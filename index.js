@@ -26,8 +26,8 @@ app.get('/api/analyze', async (req, res) => {
   }
 
   try {
-    // We build the URL safely using concatenation. No backticks needed!
-    const url = "https://api.bzzoiro.com/v2/events/?team_name=" + teamName + "&limit=5";
+    // CORRECTED URL: sports.bzzoiro.com/api/events/
+    const url = "https://sports.bzzoiro.com/api/events/?team_name=" + teamName + "&limit=5";
     
     const response = await axios.get(url, {
       headers: { Authorization: "Token " + API_KEY }
