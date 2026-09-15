@@ -16,7 +16,6 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// MAIN ANALYSIS ENDPOINT
 app.get('/api/analyze', async (req, res) => {
   const teamName = req.query.teamName || 'Arsenal';
   const API_KEY = process.env.BZZOIRO_API_KEY;
@@ -34,16 +33,13 @@ app.get('/api/analyze', async (req, res) => {
 
     const rawEvents = response.data.results || [];
 
-    // Debug: Send back the RAW data so we can see what Bzzoiro sent
     if (rawEvents.length === 0) {
       return res.json({ 
         status: "no_matches", 
-        message: "Bzzoiro returned zero results for '" + teamName + "'. Try a different team.",
-        debug: { teamName: teamName, url: url, rawCount: 0 }
+        message: "No matches found for " + teamName + ". Try another team name." 
       });
     }
 
-    // Build analysis for all matches (no filter for now)
     const analyzedMatches = rawEvents.map(function(match) {
       let leagueName = "Unknown Competition";
       if (match.league && match.league.name) leagueName = match.league.name;
