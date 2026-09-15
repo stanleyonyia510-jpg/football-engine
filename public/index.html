@@ -14,10 +14,7 @@
             padding: 20px;
         }
         .container { max-width: 900px; margin: 0 auto; }
-        header {
-            text-align: center;
-            padding: 40px 0;
-        }
+        header { text-align: center; padding: 40px 0; }
         header h1 {
             font-size: 2.5rem;
             background: linear-gradient(90deg, #10b981, #3b82f6);
@@ -26,11 +23,7 @@
             margin-bottom: 10px;
         }
         header p { color: #94a3b8; font-size: 1.1rem; }
-        .search-box {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 30px;
-        }
+        .search-box { display: flex; gap: 10px; margin-bottom: 30px; }
         input {
             flex: 1;
             padding: 16px 20px;
@@ -107,12 +100,7 @@
         }
         .safest-bet .label { color: #93c5fd; font-size: 0.9rem; }
         .safest-bet .value { font-size: 1.8rem; font-weight: 700; margin: 10px 0; }
-        .error {
-            background: #7f1d1d;
-            padding: 20px;
-            border-radius: 12px;
-            text-align: center;
-        }
+        .error { background: #7f1d1d; padding: 20px; border-radius: 12px; text-align: center; }
         .loading { text-align: center; padding: 40px; color: #94a3b8; }
         .hidden { display: none; }
     </style>
@@ -125,7 +113,7 @@
         </header>
 
         <div class="search-box">
-            <input type="text" id="teamInput" placeholder="Enter a team name (e.g., Arsenal, Real Madrid)" value="Arsenal">
+            <input type="text" id="teamInput" placeholder="Enter a team name (e.g., Arsenal, Real Madrid)">
             <button id="searchBtn" onclick="analyze()">Analyze</button>
         </div>
 
@@ -168,7 +156,6 @@
                     return;
                 }
 
-                // Determine verdict class
                 let verdictClass = 'nobet';
                 if (data.analysis.verdict.includes('BET')) verdictClass = 'bet';
                 if (data.analysis.verdict.includes('WAIT')) verdictClass = 'wait';
@@ -260,7 +247,6 @@
             }
         }
 
-        // Allow pressing Enter to search
         document.getElementById('teamInput').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') analyze();
         });
