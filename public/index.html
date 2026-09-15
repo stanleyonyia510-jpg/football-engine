@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Football Engine Test</title>
+    <style>
+        body { font-family: Arial; background: #0f172a; color: white; padding: 20px; }
+        input { padding: 10px; width: 60%; }
+        button { padding: 10px 20px; background: green; color: white; border: none; }
+        pre { background: #1e293b; padding: 15px; border-radius: 8px; overflow: auto; max-height: 500px; }
+    </style>
+</head>
+<body>
+    <h1>Football Engine - TEST PAGE</h1>
+    <p>If you see this, the new HTML file loaded.</p>
+    <input type="text" id="team" value="Arsenal">
+    <button onclick="go()">Search</button>
+    <div id="out">Results will appear here...</div>
+    
+    <script>
+        async function go() {
+            const team = document.getElementById('team').value;
+            document.getElementById('out').innerHTML = 'Loading... (30 seconds)';
+            
+            const res = await fetch('https://football-engine.onrender.com/api/analyze?teamName=' + team);
+            const data = await res.json();
+            
+            if (data.error) {
+                document.getElementById('out').innerHTML = 'Error: ' + data.error;
+                return;
+            }
+            
+            document.getElementById('out').innerHTML = '<h2>Found ' + data.count + ' matches</h2>' + 
+                '<pre>' + JSON.stringify(data.matches.slice(0,3), null, 2) + '</pre>';
+        }
+    </script>
+</body>
+</html>
