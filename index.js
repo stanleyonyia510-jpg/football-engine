@@ -1,33 +1,6 @@
-[3:04 PM, 9/15/2026] CHIMEE: const express = require('express');
+const express = require('express');
 const axios = require('axios');
-const app = express();
-
-app.use(express.json());
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
-  next();
-});
-
-// Health check
-app.get('/', (req, res) => {
-  res.send('Football Engine is running!');
-});
-
-// MAIN ANALYSIS ENDPOINT
-app.get('/api/analyze', async (req, res) => {
-  const teamName = req.query.teamName || 'Arsenal';
-  const API_KEY = process.env.BZZOIRO_API_KEY;
-
-  if (!API_KEY) {
-    return res.status(500).json({ error: "API key not configured." });
-  }
-
-  try {
-    const url = "https://sports.bzzoiro.com/api/events/?team_name=" + teamName + "&limit=5";
-…
-[3:17 PM, 9/15/2026] CHIMEE: const express = require('express');
-const axios = require('axios');
+const path = require('path');
 const app = express();
 
 app.use(express.json());
@@ -39,9 +12,12 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health check
+// Serve the HTML frontend from the "public" folder
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Health check endpoint
 app.get('/', (req, res) => {
-  res.send('Football Engine is running!');
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // MAIN ANALYSIS ENDPOINT
@@ -54,9 +30,8 @@ app.get('/api/analyze', async (req, res) => {
   }
 
   try {
-    // CORRECTED URL: sports.bzzoiro.com/api/events/
-    const url = "https://sports.bzzoiro.com/api/events/?team_name=" + teamName + "&limit=5";
-    
+    const url = "https://sports.bzzoiro.com/api/events/?team_name=" + encodeURIComponent(teamName) + "&limit=5";
+
     const response = await axios.get(url, {
       headers: { Authorization: "Token " + API_KEY }
     });
@@ -74,7 +49,6 @@ app.get('/api/analyze', async (req, res) => {
     const match = events[0];
 
     // --- LEAGUE NAME FIX ---
-    // Bzzoiro sends the league as an object: {id: 42, name: "Coppa Italia"}
     let leagueName = "Unknown Competition";
     if (match.league && match.league.name) {
       leagueName = match.league.name;
