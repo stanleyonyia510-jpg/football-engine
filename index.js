@@ -32,44 +32,26 @@ app.get('/api/analyze', async (req, res) => {
       headers: { Authorization: "Token " + API_KEY }
     });
 
-    // Get all matches found
-    let events = response.data.results || [];
+    const rawEvents = response.data.results || [];
 
-    // FILTER: Only keep matches where the searched team is actually playing
-    const searchLower = teamName.toLowerCase();
-    events = events.filter(function(event) {
-      var homeName = "";
-      var awayName = "";
-      
-      if (event.home_team && event.home_team.name) homeName = event.home_team.name.toLowerCase();
-      else if (typeof event.home_team === 'string') homeName = event.home_team.toLowerCase();
-      
-      if (event.away_team && event.away_team.name) awayName = event.away_team.name.toLowerCase();
-      else if (typeof event.away_team === 'string') awayName = event.away_team.toLowerCase();
-
-      return homeName.includes(searchLower) || awayName.includes(searchLower);
-    });
-
-    if (events.length === 0) {
+    // Debug: Send back the RAW data so we can see what Bzzoiro sent
+    if (rawEvents.length === 0) {
       return res.json({ 
         status: "no_matches", 
-        message: "No matches found for " + teamName + ". Try another team name." 
+        message: "Bzzoiro returned zero results for '" + teamName + "'. Try a different team.",
+        debug: { teamName: teamName, url: url, rawCount: 0 }
       });
     }
 
-    // Build the analysis for EACH match found
-    const analyzedMatches = events.map(function(match) {
-      
-      // League name fix
+    // Build analysis for all matches (no filter for now)
+    const analyzedMatches = rawEvents.map(function(match) {
       let leagueName = "Unknown Competition";
       if (match.league && match.league.name) leagueName = match.league.name;
       else if (match.league_name) leagueName = match.league_name;
 
-      // Team name fix
       const homeTeamName = (match.home_team && match.home_team.name) ? match.home_team.name : (match.home_team || "Home Team");
       const awayTeamName = (match.away_team && match.away_team.name) ? match.away_team.name : (match.away_team || "Away Team");
 
-      // Analysis
       const homeXg = parseFloat(match.home_xg) || 1.5;
       const awayXg = parseFloat(match.away_xg) || 1.2;
       const totalXg = homeXg + awayXg;
@@ -124,34 +106,17 @@ app.get('/api/analyze', async (req, res) => {
           kickoff: match.event_date || match.date || "Unknown",
           matchStatus: match.status || "unknown"
         },
-        probabilities: {
-          homeWin: Math.round(homeWinProb),
-          draw: Math.round(drawProb),
-          awayWin: Math.round(awayWinProb)
-        },
-        expectedGoals: {
-          home: homeXg.toFixed(2),
-          away: awayXg.toFixed(2),
-          total: totalXg.toFixed(2)
-        },
-        markets: {
-          over25: Math.round(over25Prob),
-          under25: Math.round(100 - over25Prob),
-          bttsYes: Math.round(bttsProb),
-          bttsNo: Math.round(100 - bttsProb)
-        },
-        analysis: {
-          confidence: confidenceScore,
-          safestBet: safestBet,
-          probability: Math.round(safestProb),
-          verdict: verdict
-        }
+        probabilities: { homeWin: Math.round(homeWinProb), draw: Math.round(drawProb), awayWin: Math.round(awayWinProb) },
+        expectedGoals: { home: homeXg.toFixed(2), away: awayXg.toFixed(2), total: totalXg.toFixed(2) },
+        markets: { over25: Math.round(over25Prob), under25: Math.round(100 - over25Prob), bttsYes: Math.round(bttsProb), bttsNo: Math.round(100 - bttsProb) },
+        analysis: { confidence: confidenceScore, safestBet: safestBet, probability: Math.round(safestProb), verdict: verdict }
       };
     });
 
     res.json({
       status: "success",
       count: analyzedMatches.length,
+      searchTerm: teamName,
       matches: analyzedMatches
     });
 
