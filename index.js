@@ -4,21 +4,21 @@ const app = express();
 
 app.use(express.json());
 
-// Allow requests from anywhere
+// Allow requests from anywhere (CORS)
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
   next();
 });
 
-// Health check endpoint
+// Health check
 app.get('/', (req, res) => {
   res.send('Football Engine is running!');
 });
 
-// The main analysis endpoint
+// Main endpoint
 app.get('/api/analyze', async (req, res) => {
-  const { teamName } = req.query;
+  const teamName = req.query.teamName || 'Arsenal';
   const API_KEY = process.env.BZZOIRO_API_KEY;
 
   if (!API_KEY) {
@@ -26,4 +26,27 @@ app.get('/api/analyze', async (req, res) => {
   }
 
   try {
-    const response = await axios.get(https://api.bzzoiro.com/v2/events/?team_name=${teamName}&limit=5, {
+    // We build the URL safely using concatenation. No backticks needed!
+    const url = "https://api.bzzoiro.com/v2/events/?team_name=" + teamName + "&limit=5";
+    
+    const response = await axios.get(url, {
+      headers: { Authorization: "Token " + API_KEY }
+    });
+
+    const events = response.data.results || [];
+    
+    res.json({ 
+      status: "success", 
+      count: events.length,
+      matches: events 
+    });
+
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).json({ error: "Failed to fetch from Bzzoiro: " + error.message });
+  }
+});
+
+// Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Server running on port " + PORT));
