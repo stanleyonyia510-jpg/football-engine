@@ -14,7 +14,7 @@
         .search-box { display: flex; gap: 10px; margin-bottom: 30px; }
         input { flex: 1; padding: 16px 20px; border-radius: 12px; border: 2px solid #334155; background: #1e293b; color: #f1f5f9; font-size: 1rem; outline: none; }
         input:focus { border-color: #10b981; }
-        button { padding: 16px 30px; border-radius: 12px; border: none; background: linear-gradient(90deg, #10b981, #059669); color: white; font-size: 1rem; font-weight: 600; cursor: pointer; transition: transform 0.2s; }
+        button { padding: 16px 30px; border-radius: 12px; border: none; background: linear-gradient(90deg, #10b981, #059669); color: white; font-size: 1rem; font-weight: 600; cursor: pointer; }
         button:hover { transform: scale(1.05); }
         button:disabled { opacity: 0.5; cursor: not-allowed; }
         .section-title { text-align: center; color: #94a3b8; font-size: 1rem; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 20px; }
@@ -35,12 +35,16 @@
         .verdict.bet { background: #10b981; color: white; }
         .verdict.wait { background: #f59e0b; color: white; }
         .verdict.nobet { background: #ef4444; color: white; }
+        .prediction-row { background: #0f172a; border-radius: 10px; padding: 12px 18px; margin-top: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .prediction-label { color: #94a3b8; font-size: 0.85rem; }
+        .prediction-value { font-weight: 700; font-size: 1.1rem; color: #10b981; }
         .safest-bet { background: linear-gradient(90deg, #1e3a8a, #1e40af); border-radius: 12px; padding: 20px; text-align: center; margin-top: 20px; }
         .safest-bet .label { color: #93c5fd; font-size: 0.9rem; }
         .safest-bet .value { font-size: 1.8rem; font-weight: 700; margin: 10px 0; }
         .error { background: #7f1d1d; padding: 20px; border-radius: 12px; text-align: center; }
         .loading { text-align: center; padding: 40px; color: #94a3b8; }
         .hidden { display: none; }
+        h3 { margin-top: 20px; margin-bottom: 10px; font-size: 1.1rem; color: #cbd5e1; }
     </style>
 </head>
 <body>
@@ -65,12 +69,8 @@
         function renderMatches(matches, title) {
             let html = '';
             const titleEl = document.getElementById('sectionTitle');
-            if (title) {
-                titleEl.textContent = title;
-                titleEl.classList.remove('hidden');
-            } else {
-                titleEl.classList.add('hidden');
-            }
+            if (title) { titleEl.textContent = title; titleEl.classList.remove('hidden'); }
+            else { titleEl.classList.add('hidden'); }
 
             matches.forEach(function(m) {
                 let verdictClass = 'nobet';
@@ -92,16 +92,49 @@
                 html += '<div class="date">' + new Date(m.match.kickoff).toLocaleString() + '</div>';
                 html += '</div>';
                 html += '<div class="verdict ' + verdictClass + '">' + m.analysis.verdict + '</div>';
+
+                // PREDICTIONS
+                html += '<h3>🎯 Predictions</h3>';
+                html += '<div class="prediction-row"><span class="prediction-label">Match Result</span><span class="prediction-value">' + m.predictions.matchResult + '</span></div>';
+                html += '<div class="prediction-row"><span class="prediction-label">Double Chance</span><span class="prediction-value">' + m.predictions.doubleChance + '</span></div>';
+
+                // 1X2
+                html += '<h3>📊 Match Result Probabilities</h3>';
                 html += '<div class="grid">';
                 html += '<div class="stat-box"><div class="stat-label">Home Win</div><div class="stat-value" style="color:#10b981">' + m.probabilities.homeWin + '%</div></div>';
                 html += '<div class="stat-box"><div class="stat-label">Draw</div><div class="stat-value" style="color:#f59e0b">' + m.probabilities.draw + '%</div></div>';
                 html += '<div class="stat-box"><div class="stat-label">Away Win</div><div class="stat-value" style="color:#3b82f6">' + m.probabilities.awayWin + '%</div></div>';
                 html += '</div>';
+
+                // GOALS
+                html += '<h3>⚽ Goals Markets</h3>';
+                html += '<div class="grid">';
+                html += '<div class="stat-box"><div class="stat-label">Over 1.5</div><div class="stat-value">' + m.markets.over15 + '%</div></div>';
+                html += '<div class="stat-box"><div class="stat-label">Over 2.5</div><div class="stat-value">' + m.markets.over25 + '%</div></div>';
+                html += '<div class="stat-box"><div class="stat-label">Over 3.5</div><div class="stat-value">' + m.markets.over35 + '%</div></div>';
+                html += '<div class="stat-box"><div class="stat-label">Over 4.5</div><div class="stat-value">' + m.markets.over45 + '%</div></div>';
+                html += '</div>';
+                html += '<div class="grid">';
+                html += '<div class="stat-box"><div class="stat-label">Under 1.5</div><div class="stat-value">' + m.markets.under15 + '%</div></div>';
+                html += '<div class="stat-box"><div class="stat-label">Under 2.5</div><div class="stat-value">' + m.markets.under25 + '%</div></div>';
+                html += '<div class="stat-box"><div class="stat-label">Under 3.5</div><div class="stat-value">' + m.markets.under35 + '%</div></div>';
+                html += '<div class="stat-box"><div class="stat-label">Under 4.5</div><div class="stat-value">' + m.markets.under45 + '%</div></div>';
+                html += '</div>';
+
+                // BTTS
+                html += '<h3>🥅 Both Teams To Score</h3>';
+                html += '<div class="grid">';
+                html += '<div class="stat-box"><div class="stat-label">BTTS Yes</div><div class="stat-value" style="color:#10b981">' + m.markets.bttsYes + '%</div></div>';
+                html += '<div class="stat-box"><div class="stat-label">BTTS No</div><div class="stat-value" style="color:#ef4444">' + m.markets.bttsNo + '%</div></div>';
+                html += '</div>';
+
+                // SAFEST BET
                 html += '<div class="safest-bet">';
                 html += '<div class="label">🎯 SAFEST SELECTION</div>';
                 html += '<div class="value">' + m.analysis.safestBet + '</div>';
                 html += '<div class="label">Confidence: ' + m.analysis.confidence + '% | Probability: ' + m.analysis.probability + '%</div>';
                 html += '</div>';
+
                 html += '</div>';
             });
 
@@ -114,26 +147,13 @@
             loading.classList.remove('hidden');
             errorDiv.classList.add('hidden');
             document.getElementById('results').innerHTML = '';
-
             try {
                 const response = await fetch('https://football-engine.onrender.com/api/today');
                 const data = await response.json();
                 loading.classList.add('hidden');
-
-                if (data.error) {
-                    errorDiv.textContent = data.error;
-                    errorDiv.classList.remove('hidden');
-                    return;
-                }
-
-                if (data.status === 'no_matches') {
-                    errorDiv.textContent = data.message;
-                    errorDiv.classList.remove('hidden');
-                    return;
-                }
-
+                if (data.error) { errorDiv.textContent = data.error; errorDiv.classList.remove('hidden'); return; }
+                if (data.status === 'no_matches') { errorDiv.textContent = data.message; errorDiv.classList.remove('hidden'); return; }
                 renderMatches(data.matches, '📅 Today & Upcoming Matches');
-
             } catch (error) {
                 loading.classList.add('hidden');
                 errorDiv.textContent = 'Connection error. Server may be waking up. Please refresh.';
@@ -144,38 +164,22 @@
         async function analyze() {
             const team = document.getElementById('teamInput').value;
             if (!team) return;
-
             const btn = document.getElementById('searchBtn');
             const loading = document.getElementById('loading');
             const errorDiv = document.getElementById('error');
             const results = document.getElementById('results');
-
             btn.disabled = true;
             loading.classList.remove('hidden');
             errorDiv.classList.add('hidden');
             results.innerHTML = '';
-
             try {
                 const response = await fetch('https://football-engine.onrender.com/api/analyze?teamName=' + encodeURIComponent(team));
                 const data = await response.json();
-
                 loading.classList.add('hidden');
                 btn.disabled = false;
-
-                if (data.status === 'no_matches') {
-                    errorDiv.textContent = data.message;
-                    errorDiv.classList.remove('hidden');
-                    return;
-                }
-
-                if (data.error) {
-                    errorDiv.textContent = data.error;
-                    errorDiv.classList.remove('hidden');
-                    return;
-                }
-
+                if (data.status === 'no_matches') { errorDiv.textContent = data.message; errorDiv.classList.remove('hidden'); return; }
+                if (data.error) { errorDiv.textContent = data.error; errorDiv.classList.remove('hidden'); return; }
                 renderMatches(data.matches, '🔍 Results for "' + team + '"');
-
             } catch (error) {
                 loading.classList.add('hidden');
                 btn.disabled = false;
