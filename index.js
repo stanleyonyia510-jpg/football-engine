@@ -1,4 +1,4 @@
-const express = require('express');
+[5:15 AM, 9/16/2026] CHIMEE: const express = require('express');
 const axios = require('axios');
 const path = require('path');
 const app = express();
@@ -15,6 +15,29 @@ app.get('/', (req, res) => {
 });
 
 // Get realistic xG for a league based on name
+function leagueXg(leagueName) {
+  const name = (leagueName || "").toLowerCase();
+  if (name.includes("premier league")) return 3.0;
+  if (name.includes("la liga")) return 2.6;
+  if (name.includes("bundesliga")) return 3.2;
+  if (na…
+[5:26 AM, 9/16/2026] CHIMEE: const express = require('express');
+const axios = require('axios');
+const path = require('path');
+const app = express();
+
+app.use(express.json());
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+  next();
+});
+app.use(express.static(path.join(__dirname, 'public')));
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// League strength tiers
 function leagueXg(leagueName) {
   const name = (leagueName || "").toLowerCase();
   if (name.includes("premier league")) return 3.0;
@@ -38,13 +61,13 @@ function leagueXg(leagueName) {
   if (name.includes("j-league") || name.includes("japan")) return 2.7;
   if (name.includes("k league") || name.includes("korea")) return 2.6;
   if (name.includes("nigeria") || name.includes("egypt")) return 2.3;
+  if (name.includes("girabola") || name.includes("angola")) return 2.2;
   if (name.includes("australia")) return 2.8;
   if (name.includes("copa")) return 2.3;
   if (name.includes("cup")) return 2.7;
   return 2.5;
 }
 
-// Get league draw tendency
 function leagueDraw(leagueName) {
   const name = (leagueName || "").toLowerCase();
   if (name.includes("ligue 1")) return 0.30;
@@ -70,9 +93,17 @@ function hashString(str) {
   return Math.abs(hash);
 }
 
+// Extract readable names from team objects or strings
+function getTeamName(team) {
+  if (!team) return "Unknown";
+  if (typeof team === 'string') return team;
+  if (team.name) return team.name;
+  return "Unknown";
+}
+
 function analyzeMatch(match) {
-  const homeTeamName = (match.home_team && match.home_team.name) ? match.home_team.name : (match.home_team || "Home Team");
-  const awayTeamName = (match.away_team && match.away_team.name) ? match.away_team.name : (match.away_team || "Away Team");
+  const homeTeamName = getTeamName(match.home_team);
+  const awayTeamName = getTeamName(match.away_team);
 
   let leagueName = "Unknown Competition";
   if (match.league && match.league.name) leagueName = match.league.name;
@@ -183,14 +214,30 @@ function analyzeMatch(match) {
   if (safestProb > 60 && confidence > 50) verdict = "🟡 WAIT FOR MORE INFORMATION";
   if (safestProb > 72 && confidence > 65) verdict = "🟢 BET";
 
+  // Get Bzzoiro AI preview text if available
+  let aiPreview = "";
+  if (match.ai_preview && match.ai_preview.text) {
+    aiPreview = match.ai_preview.text;
+  }
+
+  // Get venue and referee
+  let venue = "";
+  if (match.venue && match.venue.name) venue = match.venue.name;
+  
+  let referee = "";
+  if (match.referee && match.referee.name) referee = match.referee.name;
+
   return {
     match: {
       home: homeTeamName,
       away: awayTeamName,
       league: leagueName,
       kickoff: match.event_date || match.date || "Unknown",
-      matchStatus: status
+      matchStatus: status,
+      venue: venue,
+      referee: referee
     },
+    aiPreview: aiPreview,
     probabilities: { homeWin: homeWinProb, draw: drawProb, awayWin: awayWinProb },
     expectedGoals: { home: homeXg.toFixed(2), away: awayXg.toFixed(2), total: totalXg.toFixed(2) },
     predictions: { matchResult: matchResultPrediction, doubleChance: doubleChancePrediction },
@@ -221,34 +268,25 @@ app.get('/api/today', async (req, res) => {
   }
 });
 
-// SEARCH - Get all matches for a team
+// SEARCH - Returns whatever Bzzoiro has (no more broken filtering)
 app.get('/api/analyze', async (req, res) => {
-  const teamName = req.query.teamName || 'Arsenal';
+  const teamName = req.query.teamName || '';
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
 
   try {
-    const listUrl = "https://sports.bzzoiro.com/api/events/?team_name=" + encodeURIComponent(teamName) + "&limit=50";
-    const listResponse = await axios.get(listUrl, { headers: { Authorization: "Token " + API_KEY }, timeout: 12000 });
-    let rawEvents = listResponse.data.results || [];
-
-    if (rawEvents.length === 0) {
-      return res.json({ status: "no_matches", message: "No matches found for " + teamName + ". Try another team name." });
+    let listUrl;
+    if (teamName && teamName.trim() !== '') {
+      listUrl = "https://sports.bzzoiro.com/api/events/?team_name=" + encodeURIComponent(teamName) + "&limit=20";
+    } else {
+      listUrl = "https://sports.bzzoiro.com/api/events/?limit=20";
     }
-
-    const searchLower = teamName.toLowerCase().trim();
-    rawEvents = rawEvents.filter(function(event) {
-      let homeName = "";
-      let awayName = "";
-      if (event.home_team && event.home_team.name) homeName = event.home_team.name.toLowerCase();
-      else if (typeof event.home_team === 'string') homeName = event.home_team.toLowerCase();
-      if (event.away_team && event.away_team.name) awayName = event.away_team.name.toLowerCase();
-      else if (typeof event.away_team === 'string') awayName = event.away_team.toLowerCase();
-      return homeName.includes(searchLower) || awayName.includes(searchLower);
-    });
+    
+    const listResponse = await axios.get(listUrl, { headers: { Authorization: "Token " + API_KEY }, timeout: 12000 });
+    const rawEvents = listResponse.data.results || [];
 
     if (rawEvents.length === 0) {
-      return res.json({ status: "no_matches", message: "No matches found for " + teamName + "." });
+      return res.json({ status: "no_matches", message: "No matches found. Try another search." });
     }
 
     const analyzedMatches = rawEvents.map(analyzeMatch);
@@ -263,33 +301,6 @@ app.get('/api/analyze', async (req, res) => {
     res.json({ status: "success", count: analyzedMatches.length, searchTerm: teamName, matches: analyzedMatches });
   } catch (error) {
     res.status(500).json({ error: "Failed: " + error.message });
-  }
-});
-
-// DEBUG ENDPOINT - shows raw Bzzoiro data (we will remove this later)
-app.get('/api/debug', async (req, res) => {
-  const API_KEY = process.env.BZZOIRO_API_KEY;
-  const teamName = req.query.teamName || 'Arsenal';
-  if (!API_KEY) return res.status(500).json({ error: "No API key" });
-  try {
-    const url = "https://sports.bzzoiro.com/api/events/?team_name=" + encodeURIComponent(teamName) + "&limit=5";
-    const response = await axios.get(url, { headers: { Authorization: "Token " + API_KEY }, timeout: 10000 });
-    const data = response.data;
-    const results = data.results || [];
-    res.json({
-      debug: true,
-      searchTerm: teamName,
-      totalResults: results.length,
-      firstMatchStructure: results[0] || null,
-      teamNameFields: results[0] ? {
-        home_team: results[0].home_team,
-        away_team: results[0].away_team,
-        home_team_name: results[0].home_team_name,
-        away_team_name: results[0].away_team_name
-      } : null
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
   }
 });
 
