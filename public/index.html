@@ -20,8 +20,11 @@
         .section-title { text-align: center; color: #94a3b8; font-size: 1rem; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 20px; }
         .card { background: #1e293b; border-radius: 16px; padding: 25px; margin-bottom: 20px; border: 1px solid #334155; }
         .match-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+        .teams-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .team-logo { width: 48px; height: 48px; object-fit: contain; background: rgba(255,255,255,0.05); border-radius: 8px; padding: 4px; }
         .teams { font-size: 1.5rem; font-weight: 700; }
-        .league { color: #94a3b8; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px; }
+        .vs { color: #64748b; font-size: 1.2rem; margin: 0 8px; }
+        .league { color: #94a3b8; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px; margin-top: 5px; }
         .date { color: #64748b; font-size: 0.9rem; }
         .status-badge { display: inline-block; padding: 4px 10px; border-radius: 100px; font-size: 0.75rem; font-weight: 600; margin-top: 5px; }
         .status-live { background: #ef4444; color: white; }
@@ -38,13 +41,29 @@
         .prediction-row { background: #0f172a; border-radius: 10px; padding: 12px 18px; margin-top: 10px; display: flex; justify-content: space-between; align-items: center; }
         .prediction-label { color: #94a3b8; font-size: 0.85rem; }
         .prediction-value { font-weight: 700; font-size: 1.1rem; color: #10b981; }
-        .safest-bet { background: linear-gradient(90deg, #1e3a8a, #1e40af); border-radius: 12px; padding: 20px; text-align: center; margin-top: 20px; }
-        .safest-bet .label { color: #93c5fd; font-size: 0.9rem; }
-        .safest-bet .value { font-size: 1.8rem; font-weight: 700; margin: 10px 0; }
+        .ai-preview { background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); border-radius: 12px; padding: 20px; margin-top: 20px; border: 1px solid #3b82f6; }
+        .ai-preview-title { color: #93c5fd; font-size: 0.85rem; text-transform: uppercase; font-weight: 700; margin-bottom: 10px; letter-spacing: 1px; }
+        .ai-preview-text { color: #dbeafe; font-size: 0.95rem; line-height: 1.6; }
+        .safest-bet { background: linear-gradient(90deg, #059669, #10b981); border-radius: 12px; padding: 20px; text-align: center; margin-top: 20px; }
+        .safest-bet .label { color: #d1fae5; font-size: 0.9rem; }
+        .safest-bet .value { font-size: 1.8rem; font-weight: 700; margin: 10px 0; color: white; }
         .error { background: #7f1d1d; padding: 20px; border-radius: 12px; text-align: center; }
         .loading { text-align: center; padding: 40px; color: #94a3b8; }
         .hidden { display: none; }
         h3 { margin-top: 20px; margin-bottom: 10px; font-size: 1.1rem; color: #cbd5e1; }
+        
+        /* CHART STYLES */
+        .chart-bar-container { margin-top: 10px; }
+        .chart-row { display: flex; align-items: center; margin-bottom: 8px; }
+        .chart-label { width: 100px; color: #94a3b8; font-size: 0.85rem; }
+        .chart-bar-bg { flex: 1; background: #0f172a; border-radius: 6px; height: 24px; position: relative; overflow: hidden; }
+        .chart-bar { height: 100%; border-radius: 6px; transition: width 0.5s; }
+        .chart-bar.home { background: linear-gradient(90deg, #10b981, #059669); }
+        .chart-bar.draw { background: linear-gradient(90deg, #f59e0b, #d97706); }
+        .chart-bar.away { background: linear-gradient(90deg, #3b82f6, #2563eb); }
+        .chart-bar.over { background: linear-gradient(90deg, #8b5cf6, #7c3aed); }
+        .chart-bar.btts { background: linear-gradient(90deg, #ec4899, #db2777); }
+        .chart-value { margin-left: 10px; color: #f1f5f9; font-weight: 700; font-size: 0.85rem; width: 50px; text-align: right; }
     </style>
 </head>
 <body>
@@ -55,8 +74,8 @@
         </header>
 
         <div class="search-box">
-            <input type="text" id="teamInput" placeholder="Enter a team name (e.g., Arsenal, Real Madrid)">
-            <button id="searchBtn" onclick="analyze()">Analyze</button>
+            <input type="text" id="teamInput" placeholder="Search for anything (e.g., Premier League, Arsenal, Brazil)">
+            <button id="searchBtn" onclick="analyze()">Search</button>
         </div>
 
         <div id="loading" class="loading hidden">Loading matches... (this may take 30 seconds on first load)</div>
@@ -66,6 +85,43 @@
     </div>
 
     <script>
+        // Generate a placeholder logo from team name initials
+        function teamInitials(name) {
+            if (!name) return "?";
+            const words = name.replace(/FC|SC|CF|AC|AFC|United|City|Club/g, '').trim().split(/\s+/);
+            if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+            return name.substring(0, 2).toUpperCase();
+        }
+
+        // Generate a unique color for each team
+        function teamColor(name) {
+            let hash = 0;
+            for (let i = 0; i < name.length; i++) {
+                hash = name.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            const colors = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
+            return colors[Math.abs(hash) % colors.length];
+        }
+
+        function makeLogo(name) {
+            const initials = teamInitials(name);
+            const color = teamColor(name);
+            const svg = <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="${color}"/><text x="32" y="42" font-family="Arial,sans-serif" font-size="28" font-weight="bold" fill="white" text-anchor="middle">${initials}</text></svg>;
+            return 'data:image/svg+xml;base64,' + btoa(svg);
+        }
+
+        function renderChart(label, value, colorClass) {
+            return `
+                <div class="chart-row">
+                    <div class="chart-label">${label}</div>
+                    <div class="chart-bar-bg">
+                        <div class="chart-bar ${colorClass}" style="width: ${value}%"></div>
+                    </div>
+                    <div class="chart-value">${value}%</div>
+                </div>
+            `;
+        }
+
         function renderMatches(matches, title) {
             let html = '';
             const titleEl = document.getElementById('sectionTitle');
@@ -79,13 +135,22 @@
 
                 let statusClass = 'status-upcoming';
                 let statusText = 'UPCOMING';
-                if (m.match.matchStatus === 'live') { statusClass = 'status-live'; statusText = '🔴 LIVE'; }
+                if (m.match.matchStatus === 'live' || m.match.matchStatus === 'inprogress' || m.match.matchStatus === '2nd_half' || m.match.matchStatus === '1st_half' || m.match.matchStatus === 'halftime') { statusClass = 'status-live'; statusText = '🔴 LIVE'; }
                 else if (m.match.matchStatus === 'finished') { statusClass = 'status-finished'; statusText = 'FINISHED'; }
+
+                const homeLogo = makeLogo(m.match.home);
+                const awayLogo = makeLogo(m.match.away);
 
                 html += '<div class="card">';
                 html += '<div class="match-header">';
                 html += '<div>';
-                html += '<div class="teams">' + m.match.home + ' vs ' + m.match.away + '</div>';
+                html += '<div class="teams-row">';
+                html += '<img src="' + homeLogo + '" class="team-logo" alt="' + m.match.home + '">';
+                html += '<span class="teams">' + m.match.home + '</span>';
+                html += '<span class="vs">vs</span>';
+                html += '<span class="teams">' + m.match.away + '</span>';
+                html += '<img src="' + awayLogo + '" class="team-logo" alt="' + m.match.away + '">';
+                html += '</div>';
                 html += '<div class="league">' + m.match.league + '</div>';
                 html += '<div class="status-badge ' + statusClass + '">' + statusText + '</div>';
                 html += '</div>';
@@ -93,42 +158,42 @@
                 html += '</div>';
                 html += '<div class="verdict ' + verdictClass + '">' + m.analysis.verdict + '</div>';
 
-                // PREDICTIONS
+                // BZZOIRO AI PREVIEW
+                if (m.aiPreview && m.aiPreview.length > 10) {
+                    html += '<div class="ai-preview">';
+                    html += '<div class="ai-preview-title">🤖 Bzzoiro AI Match Analysis</div>';
+                    html += '<div class="ai-preview-text">' + m.aiPreview.replace(/\n/g, '<br>') + '</div>';
+                    html += '</div>';
+                }
+
                 html += '<h3>🎯 Predictions</h3>';
                 html += '<div class="prediction-row"><span class="prediction-label">Match Result</span><span class="prediction-value">' + m.predictions.matchResult + '</span></div>';
                 html += '<div class="prediction-row"><span class="prediction-label">Double Chance</span><span class="prediction-value">' + m.predictions.doubleChance + '</span></div>';
 
-                // 1X2
-                html += '<h3>📊 Match Result Probabilities</h3>';
-                html += '<div class="grid">';
-                html += '<div class="stat-box"><div class="stat-label">Home Win</div><div class="stat-value" style="color:#10b981">' + m.probabilities.homeWin + '%</div></div>';
-                html += '<div class="stat-box"><div class="stat-label">Draw</div><div class="stat-value" style="color:#f59e0b">' + m.probabilities.draw + '%</div></div>';
-                html += '<div class="stat-box"><div class="stat-label">Away Win</div><div class="stat-value" style="color:#3b82f6">' + m.probabilities.awayWin + '%</div></div>';
+                // CHART: Match Result
+                html += '<h3>📊 Match Result Chart</h3>';
+                html += '<div class="chart-bar-container">';
+                html += renderChart('Home Win', m.probabilities.homeWin, 'home');
+                html += renderChart('Draw', m.probabilities.draw, 'draw');
+                html += renderChart('Away Win', m.probabilities.awayWin, 'away');
                 html += '</div>';
 
-                // GOALS
-                html += '<h3>⚽ Goals Markets</h3>';
-                html += '<div class="grid">';
-                html += '<div class="stat-box"><div class="stat-label">Over 1.5</div><div class="stat-value">' + m.markets.over15 + '%</div></div>';
-                html += '<div class="stat-box"><div class="stat-label">Over 2.5</div><div class="stat-value">' + m.markets.over25 + '%</div></div>';
-                html += '<div class="stat-box"><div class="stat-label">Over 3.5</div><div class="stat-value">' + m.markets.over35 + '%</div></div>';
-                html += '<div class="stat-box"><div class="stat-label">Over 4.5</div><div class="stat-value">' + m.markets.over45 + '%</div></div>';
-                html += '</div>';
-                html += '<div class="grid">';
-                html += '<div class="stat-box"><div class="stat-label">Under 1.5</div><div class="stat-value">' + m.markets.under15 + '%</div></div>';
-                html += '<div class="stat-box"><div class="stat-label">Under 2.5</div><div class="stat-value">' + m.markets.under25 + '%</div></div>';
-                html += '<div class="stat-box"><div class="stat-label">Under 3.5</div><div class="stat-value">' + m.markets.under35 + '%</div></div>';
-                html += '<div class="stat-box"><div class="stat-label">Under 4.5</div><div class="stat-value">' + m.markets.under45 + '%</div></div>';
+                // CHART: Goals Markets
+                html += '<h3>⚽ Goals Chart</h3>';
+                html += '<div class="chart-bar-container">';
+                html += renderChart('Over 1.5', m.markets.over15, 'over');
+                html += renderChart('Over 2.5', m.markets.over25, 'over');
+                html += renderChart('Over 3.5', m.markets.over35, 'over');
+                html += renderChart('Over 4.5', m.markets.over45, 'over');
                 html += '</div>';
 
-                // BTTS
-                html += '<h3>🥅 Both Teams To Score</h3>';
-                html += '<div class="grid">';
-                html += '<div class="stat-box"><div class="stat-label">BTTS Yes</div><div class="stat-value" style="color:#10b981">' + m.markets.bttsYes + '%</div></div>';
-                html += '<div class="stat-box"><div class="stat-label">BTTS No</div><div class="stat-value" style="color:#ef4444">' + m.markets.bttsNo + '%</div></div>';
+                // CHART: BTTS
+                html += '<h3>🥅 BTTS Chart</h3>';
+                html += '<div class="chart-bar-container">';
+                html += renderChart('BTTS Yes', m.markets.bttsYes, 'btts');
+                html += renderChart('BTTS No', m.markets.bttsNo, 'home');
                 html += '</div>';
 
-                // SAFEST BET
                 html += '<div class="safest-bet">';
                 html += '<div class="label">🎯 SAFEST SELECTION</div>';
                 html += '<div class="value">' + m.analysis.safestBet + '</div>';
@@ -153,7 +218,7 @@
                 loading.classList.add('hidden');
                 if (data.error) { errorDiv.textContent = data.error; errorDiv.classList.remove('hidden'); return; }
                 if (data.status === 'no_matches') { errorDiv.textContent = data.message; errorDiv.classList.remove('hidden'); return; }
-                renderMatches(data.matches, '📅 Today & Upcoming Matches');
+                renderMatches(data.matches, '📅 Latest Matches with Bzzoiro AI Analysis');
             } catch (error) {
                 loading.classList.add('hidden');
                 errorDiv.textContent = 'Connection error. Server may be waking up. Please refresh.';
@@ -163,7 +228,6 @@
 
         async function analyze() {
             const team = document.getElementById('teamInput').value;
-            if (!team) return;
             const btn = document.getElementById('searchBtn');
             const loading = document.getElementById('loading');
             const errorDiv = document.getElementById('error');
@@ -179,7 +243,8 @@
                 btn.disabled = false;
                 if (data.status === 'no_matches') { errorDiv.textContent = data.message; errorDiv.classList.remove('hidden'); return; }
                 if (data.error) { errorDiv.textContent = data.error; errorDiv.classList.remove('hidden'); return; }
-                renderMatches(data.matches, '🔍 Results for "' + team + '"');
+                const title = team ? '🔍 Results for "' + team + '"' : '📅 Latest Matches';
+                renderMatches(data.matches, title);
             } catch (error) {
                 loading.classList.add('hidden');
                 btn.disabled = false;
