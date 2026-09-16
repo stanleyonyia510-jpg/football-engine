@@ -75,123 +75,160 @@ function getTeamName(team) {
   return "Unknown";
 }
 
-function normalize(name) {
-  return (name || "").toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+// Strip accents and lowercase
+function normalize(str) {
+  return (str || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
+// Get distinctive keywords from a team name
+function getKeywords(name) {
+  const stopWords = ["fc", "sc", "cf", "ac", "afc", "the", "and", "city", "club", "united", "de", "do", "da", "aif", "if", "sk", "cd"];
+  return normalize(name).split(" ").filter(function(w) { return w.length > 3 && stopWords.indexOf(w) === -1; });
+}
+
+// Main AI prediction parser
 function parseAIPrediction(aiText, homeTeam, awayTeam) {
   if (!aiText) return null;
 
   const text = aiText;
-  const textLower = text.toLowerCase();
+  const textNorm = normalize(text);
   const homeNorm = normalize(homeTeam);
   const awayNorm = normalize(awayTeam);
+  const homeKeywords = getKeywords(homeTeam);
+  const awayKeywords = getKeywords(awayTeam);
 
-  const stopWords = ['fc', 'sc', 'cf', 'ac', 'afc', 'the', 'and', 'city', 'club', 'united'];
-  function getKeywords(name) {
-    return name.split(/\s+/).filter(function(w) { return w.length > 3 && stopWords.indexOf(w) === -1; });
+  // Find the LAST occurrence of a keyword in the text (closest to the prediction)
+  function findKeywordPos(keywords, text) {
+    let bestPos = -1;
+    keywords.forEach(function(k) {
+      let pos = text.lastIndexOf(k);
+      if (pos > bestPos) bestPos = pos;
+    });
+    return bestPos;
   }
-  const homeKeywords = getKeywords(homeNorm);
-  const awayKeywords = getKeywords(awayNorm);
 
-  // STEP 1: Look for the "Prediction:" line
-  const predMatch = text.match(/Prediction:\s*\n?\s*\\([^]+?)\\*/i);
-  if (predMatch) {
-    const predictionText = predMatch[1].toLowerCase();
-    const homeInPred = homeKeywords.some(function(k) { return predictionText.indexOf(k) !== -1; });
-    const awayInPred = awayKeywords.some(function(k) { return predictionText.indexOf(k) !== -1; });
+  // STEP 1: Look for the "Prediction:" section
+  const predSectionMatch = text.match(/Prediction:\s*\n?\s*\\([^]+?)\\*/i);
+  if (predSectionMatch) {
+    const predText = predSectionMatch[1];
+    const predNorm = normalize(predText);
 
-    const scoreMatch = predictionText.match(/(\d+)\s*[-–]\s*(\d+)/);
+    // Which team appears FIRST in the prediction?
+    const homePosInPred = findKeywordPos(homeKeywords, predNorm);
+    const awayPosInPred = findKeywordPos(awayKeywords, predNorm);
+
+    // Look for score in the prediction
+    const scoreMatch = predNorm.match(/(\d+)\s*[-–]\s*(\d+)/);
     if (scoreMatch) {
       const firstScore = parseInt(scoreMatch[1]);
       const secondScore = parseInt(scoreMatch[2]);
 
-      let firstTeamIsHome = true;
-      let firstTeamPos = 999999;
-
-      homeKeywords.forEach(function(k) {
-        const pos = predictionText.indexOf(k);
-        if (pos !== -1 && pos < firstTeamPos) { firstTeamPos = pos; firstTeamIsHome = true; }
-      });
-      awayKeywords.forEach(function(k) {
-        const pos = predictionText.indexOf(k);
-        if (pos !== -1 && pos < firstTeamPos) { firstTeamPos = pos; firstTeamIsHome = false; }
-      });
-
-      if (firstTeamPos === 999999) {
-        const homePos = predictionText.indexOf(homeNorm.split(' ')[0]);
-        const awayPos = predictionText.indexOf(awayNorm.split(' ')[0]);
-        if (homePos !== -1 && (awayPos === -1 || homePos < awayPos)) firstTeamIsHome = true;
-        else if (awayPos !== -1) firstTeamIsHome = false;
+      // If both teams present, figure out who's first
+      if (homePosInPred !== -1 && awayPosInPred !== -1) {
+        if (homePosInPred < awayPosInPred) {
+          // Home team is first in the score
+          if (firstScore > secondScore) return "HOME";
+          if (secondScore > firstScore) return "AWAY";
+          return "DRAW";
+        } else {
+          // Away team is first in the score
+          if (firstScore > secondScore) return "AWAY";
+          if (secondScore > firstScore) return "HOME";
+          return "DRAW";
+        }
       }
-
-      let homeFinal, awayFinal;
-      if (firstTeamIsHome) {
-        homeFinal = firstScore;
-        awayFinal = secondScore;
-      } else {
-        awayFinal = firstScore;
-        homeFinal = secondScore;
-      }
-
-      if (homeFinal > awayFinal) return "HOME";
-      if (awayFinal > homeFinal) return "AWAY";
-      return "DRAW";
+      // Only one team mentioned
+      if (homePosInPred !== -1 && awayPosInPred === -1) return "HOME";
+      if (awayPosInPred !== -1 && homePosInPred === -1) return "AWAY";
     }
-
-    if (homeInPred && !awayInPred) return "HOME";
-    if (awayInPred && !homeInPred) return "AWAY";
   }
 
-  // STEP 2: Bold headlines
+  // STEP 2: Look for "Lean [Team]" or "Back [Team]" or "Favor [Team]" patterns
+  const strongPatterns = [
+    /lean\s+(?:towards?\s+)?(\w[\w\s]*?)\s+(?:to|for|here)/i,
+    /back(?:ing)?\s+(\w[\w\s]*?)\s+(?:to|for|here)/i,
+    /favor(?:ing)?\s+(\w[\w\s]*?)\s+(?:to|for|here)/i,
+    /(\w[\w\s]*?)\s+(?:to|should)\s+(?:win|take|snatch|continue|extend|grind)/i
+  ];
+
+  for (let i = 0; i < strongPatterns.length; i++) {
+    const match = text.match(strongPatterns[i]);
+    if (match && match[1]) {
+      const mentioned = normalize(match[1]);
+      const mentionsHome = homeKeywords.some(function(k) { return mentioned.indexOf(k) !== -1; });
+      const mentionsAway = awayKeywords.some(function(k) { return mentioned.indexOf(k) !== -1; });
+      if (mentionsHome && !mentionsAway) return "HOME";
+      if (mentionsAway && !mentionsHome) return "AWAY";
+    }
+  }
+
+  // STEP 3: Bold headlines with clear winner language
   const boldMatches = text.match(/\\([^]+?)\\*/g);
   if (boldMatches) {
     let homeWins = 0, awayWins = 0;
     boldMatches.forEach(function(bold) {
-      const bLower = bold.toLowerCase();
+      const bLower = normalize(bold);
       const homeInBold = homeKeywords.some(function(k) { return bLower.indexOf(k) !== -1; });
       const awayInBold = awayKeywords.some(function(k) { return bLower.indexOf(k) !== -1; });
-      const winWords = ['rolling', 'favorites', 'favorit', 'dominat', 'wins', 'win', 'victor', 'edge', 'freefall', 'crisis', 'struggling', 'losing'];
-      if (homeInBold) {
-        winWords.forEach(function(w) { if (bLower.indexOf(w) !== -1) homeWins += 1; });
-      }
-      if (awayInBold) {
-        winWords.forEach(function(w) { if (bLower.indexOf(w) !== -1) awayWins += 1; });
-      }
+      
+      // Positive winner phrases
+      const winPhrases = ["rolling", "favorites", "favorit", "dominat", "have the edge", "win", "victor", "sharp", "clinical", "strong", "red hot"];
+      const lossPhrases = ["freefall", "crisis", "struggling", "weak", "poor", "limping", "losing", "wobbling", "concerns", "vulnerable"];
+
+      winPhrases.forEach(function(w) {
+        if (homeInBold && bLower.indexOf(w) !== -1) homeWins += 2;
+        if (awayInBold && bLower.indexOf(w) !== -1) awayWins += 2;
+      });
+      lossPhrases.forEach(function(w) {
+        if (homeInBold && bLower.indexOf(w) !== -1) awayWins += 1;
+        if (awayInBold && bLower.indexOf(w) !== -1) homeWins += 1;
+      });
     });
-    if (homeWins > awayWins && homeWins > 0) return "HOME";
-    if (awayWins > homeWins && awayWins > 0) return "AWAY";
+    if (homeWins > awayWins && homeWins >= 2) return "HOME";
+    if (awayWins > homeWins && awayWins >= 2) return "AWAY";
   }
 
-  // STEP 3: Proximity search
+  // STEP 4: Proximity search — find "team keyword + win word" patterns
   let homeScore = 0, awayScore = 0;
-  const positiveWords = ['win', 'victory', 'triumph', 'dominant', 'favorites', 'edge', 'stronger', 'rolling', 'sharp', 'clinical', 'solid'];
-  const negativeWords = ['freefall', 'crisis', 'struggling', 'weak', 'poor', 'limping', 'losing', 'wobbling', 'concerns'];
+  const posWords = ["win", "victory", "triumph", "dominant", "favorites", "edge", "stronger", "rolling", "sharp", "clinical", "solid", "unbeaten", "momentum"];
+  const negWords = ["freefall", "crisis", "struggling", "weak", "poor", "limping", "losing", "wobbling", "concerns", "vulnerable", "shaky"];
 
   homeKeywords.forEach(function(k) {
-    positiveWords.forEach(function(w) {
-      if (textLower.indexOf(k + ' ' + w) !== -1) homeScore += 2;
-      if (textLower.indexOf(k + "'s " + w) !== -1) homeScore += 2;
+    posWords.forEach(function(w) {
+      if (textNorm.indexOf(k + " " + w) !== -1) homeScore += 2;
+      if (textNorm.indexOf(k + " is " + w) !== -1) homeScore += 2;
+      if (textNorm.indexOf(k + " have " + w) !== -1) homeScore += 2;
+      if (textNorm.indexOf(k + " are " + w) !== -1) homeScore += 2;
     });
-    negativeWords.forEach(function(w) {
-      if (textLower.indexOf(k + ' ' + w) !== -1) awayScore += 1;
-      if (textLower.indexOf(k + ' is ' + w) !== -1) awayScore += 1;
+    negWords.forEach(function(w) {
+      if (textNorm.indexOf(k + " " + w) !== -1) awayScore += 1;
+      if (textNorm.indexOf(k + " is " + w) !== -1) awayScore += 1;
+      if (textNorm.indexOf(k + " are " + w) !== -1) awayScore += 1;
     });
   });
 
   awayKeywords.forEach(function(k) {
-    positiveWords.forEach(function(w) {
-      if (textLower.indexOf(k + ' ' + w) !== -1) awayScore += 2;
-      if (textLower.indexOf(k + "'s " + w) !== -1) awayScore += 2;
+    posWords.forEach(function(w) {
+      if (textNorm.indexOf(k + " " + w) !== -1) awayScore += 2;
+      if (textNorm.indexOf(k + " is " + w) !== -1) awayScore += 2;
+      if (textNorm.indexOf(k + " have " + w) !== -1) awayScore += 2;
+      if (textNorm.indexOf(k + " are " + w) !== -1) awayScore += 2;
     });
-    negativeWords.forEach(function(w) {
-      if (textLower.indexOf(k + ' ' + w) !== -1) homeScore += 1;
-      if (textLower.indexOf(k + ' is ' + w) !== -1) homeScore += 1;
+    negWords.forEach(function(w) {
+      if (textNorm.indexOf(k + " " + w) !== -1) homeScore += 1;
+      if (textNorm.indexOf(k + " is " + w) !== -1) homeScore += 1;
+      if (textNorm.indexOf(k + " are " + w) !== -1) homeScore += 1;
     });
   });
 
-  if (homeScore > awayScore && homeScore >= 2) return "HOME";
-  if (awayScore > homeScore && awayScore >= 2) return "AWAY";
+  if (homeScore > awayScore && homeScore >= 3) return "HOME";
+  if (awayScore > homeScore && awayScore >= 3) return "AWAY";
 
   return null;
 }
@@ -363,7 +400,6 @@ function analyzeMatch(match) {
   };
 }
 
-// TODAY ENDPOINT — now fetches up to 50 matches
 app.get('/api/today', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
