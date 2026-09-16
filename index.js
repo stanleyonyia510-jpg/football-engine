@@ -14,6 +14,7 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// League strength tables
 function leagueXg(leagueName) {
   const name = (leagueName || "").toLowerCase();
   if (name.includes("premier league")) return 3.0;
@@ -24,9 +25,8 @@ function leagueXg(leagueName) {
   if (name.includes("champions league")) return 3.0;
   if (name.includes("europa")) return 2.9;
   if (name.includes("conference")) return 2.9;
-  if (name.includes("mls") || name.includes("major league")) return 3.2;
+  if (name.includes("mls")) return 3.2;
   if (name.includes("liga mx")) return 3.0;
-  if (name.includes("allsvenskan") || name.includes("sweden")) return 2.6;
   if (name.includes("brasileir")) return 2.4;
   if (name.includes("argentina")) return 2.2;
   if (name.includes("colombia")) return 2.1;
@@ -36,7 +36,7 @@ function leagueXg(leagueName) {
   if (name.includes("championship")) return 2.6;
   if (name.includes("japan") || name.includes("korea")) return 2.7;
   if (name.includes("nigeria") || name.includes("egypt") || name.includes("tunisia")) return 2.4;
-  if (name.includes("bulgaria") || name.includes("parva")) return 2.3;
+  if (name.includes("bulgaria")) return 2.3;
   if (name.includes("girabola") || name.includes("angola")) return 2.2;
   if (name.includes("copa")) return 2.3;
   if (name.includes("cup")) return 2.7;
@@ -75,7 +75,6 @@ function getTeamName(team) {
   return "Unknown";
 }
 
-// Strip accents and lowercase
 function normalize(str) {
   return (str || "")
     .normalize("NFD")
@@ -86,151 +85,193 @@ function normalize(str) {
     .trim();
 }
 
-// Get distinctive keywords from a team name
-function getKeywords(name) {
-  const stopWords = ["fc", "sc", "cf", "ac", "afc", "the", "and", "city", "club", "united", "de", "do", "da", "aif", "if", "sk", "cd"];
-  return normalize(name).split(" ").filter(function(w) { return w.length > 3 && stopWords.indexOf(w) === -1; });
+// ================== NEW: SMART AI READER ==================
+// STEP 1: Check for structured Bzzoiro prediction fields first
+function getBzzoiroStructuredPrediction(match, homeTeam, awayTeam) {
+  // Bzzoiro may include structured fields. Check common names.
+  const candidates = [
+    match.bzz_prediction,
+    match.prediction,
+    match.model_prediction,
+    match.ai_prediction,
+    match.forecast,
+    match.pick
+  ];
+
+  for (let i = 0; i < candidates.length; i++) {
+    const pred = candidates[i];
+    if (!pred) continue;
+
+    // If it's a string like "home", "away", "draw", "1", "X", "2", "HOME WIN"
+    if (typeof pred === 'string') {
+      const p = normalize(pred);
+      if (p === "home" || p === "1" || p.indexOf("home win") !== -1 || p === "h") return "HOME";
+      if (p === "away" || p === "2" || p.indexOf("away win") !== -1 || p === "a") return "AWAY";
+      if (p === "draw" || p === "x" || p === "d") return "DRAW";
+    }
+
+    // If it's an object with fields
+    if (typeof pred === 'object') {
+      // Check winner field
+      if (pred.winner) {
+        const w = normalize(pred.winner);
+        if (w.indexOf("home") !== -1) return "HOME";
+        if (w.indexOf("away") !== -1) return "AWAY";
+        if (w.indexOf("draw") !== -1) return "DRAW";
+      }
+      // Check probabilities
+      if (pred.home_prob !== undefined && pred.away_prob !== undefined) {
+        const hp = parseFloat(pred.home_prob);
+        const ap = parseFloat(pred.away_prob);
+        const dp = parseFloat(pred.draw_prob || 0);
+        if (!isNaN(hp) && !isNaN(ap)) {
+          if (hp > ap && hp > dp) return "HOME";
+          if (ap > hp && ap > dp) return "AWAY";
+          return "DRAW";
+        }
+      }
+      // Check recommendation / value flag
+      if (pred.recommendation) {
+        const r = normalize(pred.recommendation);
+        if (r.indexOf("home") !== -1) return "HOME";
+        if (r.indexOf("away") !== -1) return "AWAY";
+        if (r.indexOf("draw") !== -1) return "DRAW";
+      }
+      if (pred.most_likely) {
+        const m = normalize(pred.most_likely);
+        if (m.indexOf("home") !== -1) return "HOME";
+        if (m.indexOf("away") !== -1) return "AWAY";
+        if (m.indexOf("draw") !== -1) return "DRAW";
+      }
+    }
+  }
+
+  // Check if match has explicit probabilities (from Bzzoiro's own model)
+  if (match.home_win_prob !== undefined && match.away_win_prob !== undefined) {
+    const hp = parseFloat(match.home_win_prob);
+    const ap = parseFloat(match.away_win_prob);
+    const dp = parseFloat(match.draw_prob || 0);
+    if (!isNaN(hp) && !isNaN(ap)) {
+      if (hp > ap && hp > dp) return "HOME";
+      if (ap > hp && ap > dp) return "AWAY";
+      return "DRAW";
+    }
+  }
+  if (match.probabilities && match.probabilities.home_win !== undefined) {
+    const hp = parseFloat(match.probabilities.home_win);
+    const ap = parseFloat(match.probabilities.away_win);
+    const dp = parseFloat(match.probabilities.draw || 0);
+    if (!isNaN(hp) && !isNaN(ap)) {
+      if (hp > ap && hp > dp) return "HOME";
+      if (ap > hp && ap > dp) return "AWAY";
+      return "DRAW";
+    }
+  }
+
+  return null;
 }
 
-// Main AI prediction parser
-function parseAIPrediction(aiText, homeTeam, awayTeam) {
+// STEP 2: Fall back to text parsing (only if structured fields are missing)
+function parseFromText(aiText, homeTeam, awayTeam) {
   if (!aiText) return null;
-
   const text = aiText;
   const textNorm = normalize(text);
   const homeNorm = normalize(homeTeam);
   const awayNorm = normalize(awayTeam);
-  const homeKeywords = getKeywords(homeTeam);
-  const awayKeywords = getKeywords(awayTeam);
 
-  // Find the LAST occurrence of a keyword in the text (closest to the prediction)
-  function findKeywordPos(keywords, text) {
-    let bestPos = -1;
-    keywords.forEach(function(k) {
-      let pos = text.lastIndexOf(k);
-      if (pos > bestPos) bestPos = pos;
-    });
-    return bestPos;
+  const stopWords = ["fc", "sc", "cf", "ac", "afc", "the", "and", "city", "club", "united", "de", "do", "da", "aif", "if", "sk", "cd"];
+  function kws(name) {
+    return normalize(name).split(" ").filter(function(w) { return w.length > 3 && stopWords.indexOf(w) === -1; });
   }
+  const homeKws = kws(homeTeam);
+  const awayKws = kws(awayTeam);
 
-  // STEP 1: Look for the "Prediction:" section
-  const predSectionMatch = text.match(/Prediction:\s*\n?\s*\\([^]+?)\\*/i);
-  if (predSectionMatch) {
-    const predText = predSectionMatch[1];
-    const predNorm = normalize(predText);
+  // Look for the "Prediction:" section with a score
+  const predMatch = text.match(/Prediction:\s*\n?\s*\\([^]+?)\\*/i);
+  if (predMatch) {
+    const predNorm = normalize(predMatch[1]);
+    let homePos = -1, awayPos = -1;
+    homeKws.forEach(function(k) { const p = predNorm.indexOf(k); if (p !== -1 && (homePos === -1 || p < homePos)) homePos = p; });
+    awayKws.forEach(function(k) { const p = predNorm.indexOf(k); if (p !== -1 && (awayPos === -1 || p < awayPos)) awayPos = p; });
 
-    // Which team appears FIRST in the prediction?
-    const homePosInPred = findKeywordPos(homeKeywords, predNorm);
-    const awayPosInPred = findKeywordPos(awayKeywords, predNorm);
-
-    // Look for score in the prediction
-    const scoreMatch = predNorm.match(/(\d+)\s*[-–]\s*(\d+)/);
+    const scoreMatch = predNorm.match(/(\d+)\s*[-]\s*(\d+)/);
     if (scoreMatch) {
-      const firstScore = parseInt(scoreMatch[1]);
-      const secondScore = parseInt(scoreMatch[2]);
-
-      // If both teams present, figure out who's first
-      if (homePosInPred !== -1 && awayPosInPred !== -1) {
-        if (homePosInPred < awayPosInPred) {
-          // Home team is first in the score
-          if (firstScore > secondScore) return "HOME";
-          if (secondScore > firstScore) return "AWAY";
+      const s1 = parseInt(scoreMatch[1]);
+      const s2 = parseInt(scoreMatch[2]);
+      if (homePos !== -1 && awayPos !== -1) {
+        if (homePos < awayPos) {
+          if (s1 > s2) return "HOME";
+          if (s2 > s1) return "AWAY";
           return "DRAW";
         } else {
-          // Away team is first in the score
-          if (firstScore > secondScore) return "AWAY";
-          if (secondScore > firstScore) return "HOME";
+          if (s1 > s2) return "AWAY";
+          if (s2 > s1) return "HOME";
           return "DRAW";
         }
       }
-      // Only one team mentioned
-      if (homePosInPred !== -1 && awayPosInPred === -1) return "HOME";
-      if (awayPosInPred !== -1 && homePosInPred === -1) return "AWAY";
+      if (homePos !== -1 && awayPos === -1) return "HOME";
+      if (awayPos !== -1 && homePos === -1) return "AWAY";
     }
   }
 
-  // STEP 2: Look for "Lean [Team]" or "Back [Team]" or "Favor [Team]" patterns
-  const strongPatterns = [
-    /lean\s+(?:towards?\s+)?(\w[\w\s]*?)\s+(?:to|for|here)/i,
-    /back(?:ing)?\s+(\w[\w\s]*?)\s+(?:to|for|here)/i,
-    /favor(?:ing)?\s+(\w[\w\s]*?)\s+(?:to|for|here)/i,
-    /(\w[\w\s]*?)\s+(?:to|should)\s+(?:win|take|snatch|continue|extend|grind)/i
+  // Look for "Lean X to win" / "Back X" patterns
+  const leanPatterns = [
+    /lean\s+(?:towards?\s+)?([a-z0-9 ]{4,30}?)\s+to/i,
+    /back(?:ing)?\s+([a-z0-9 ]{4,30}?)\s+to/i,
+    /favor(?:ing)?\s+([a-z0-9 ]{4,30}?)\s+to/i
   ];
-
-  for (let i = 0; i < strongPatterns.length; i++) {
-    const match = text.match(strongPatterns[i]);
+  for (let i = 0; i < leanPatterns.length; i++) {
+    const match = textNorm.match(leanPatterns[i]);
     if (match && match[1]) {
-      const mentioned = normalize(match[1]);
-      const mentionsHome = homeKeywords.some(function(k) { return mentioned.indexOf(k) !== -1; });
-      const mentionsAway = awayKeywords.some(function(k) { return mentioned.indexOf(k) !== -1; });
-      if (mentionsHome && !mentionsAway) return "HOME";
-      if (mentionsAway && !mentionsHome) return "AWAY";
+      const mentioned = match[1];
+      if (homeKws.some(function(k) { return mentioned.indexOf(k) !== -1; })) return "HOME";
+      if (awayKws.some(function(k) { return mentioned.indexOf(k) !== -1; })) return "AWAY";
     }
   }
 
-  // STEP 3: Bold headlines with clear winner language
-  const boldMatches = text.match(/\\([^]+?)\\*/g);
-  if (boldMatches) {
-    let homeWins = 0, awayWins = 0;
-    boldMatches.forEach(function(bold) {
-      const bLower = normalize(bold);
-      const homeInBold = homeKeywords.some(function(k) { return bLower.indexOf(k) !== -1; });
-      const awayInBold = awayKeywords.some(function(k) { return bLower.indexOf(k) !== -1; });
-      
-      // Positive winner phrases
-      const winPhrases = ["rolling", "favorites", "favorit", "dominat", "have the edge", "win", "victor", "sharp", "clinical", "strong", "red hot"];
-      const lossPhrases = ["freefall", "crisis", "struggling", "weak", "poor", "limping", "losing", "wobbling", "concerns", "vulnerable"];
+  // Look for "TeamX win" or "TeamX victory"
+  let homeWinCount = 0, awayWinCount = 0;
+  const winWords = ["win", "victory", "triumph", "dominant", "favorites", "edge", "rolling", "sharp", "clinical", "stronger", "unbeaten"];
+  const lossWords = ["freefall", "crisis", "struggling", "weak", "limping", "losing", "wobbling", "vulnerable"];
 
-      winPhrases.forEach(function(w) {
-        if (homeInBold && bLower.indexOf(w) !== -1) homeWins += 2;
-        if (awayInBold && bLower.indexOf(w) !== -1) awayWins += 2;
-      });
-      lossPhrases.forEach(function(w) {
-        if (homeInBold && bLower.indexOf(w) !== -1) awayWins += 1;
-        if (awayInBold && bLower.indexOf(w) !== -1) homeWins += 1;
-      });
+  homeKws.forEach(function(k) {
+    winWords.forEach(function(w) {
+      if (textNorm.indexOf(k + " " + w) !== -1) homeWinCount += 2;
+      if (textNorm.indexOf(k + " is " + w) !== -1) homeWinCount += 2;
+      if (textNorm.indexOf(k + " have " + w) !== -1) homeWinCount += 2;
     });
-    if (homeWins > awayWins && homeWins >= 2) return "HOME";
-    if (awayWins > homeWins && awayWins >= 2) return "AWAY";
-  }
-
-  // STEP 4: Proximity search — find "team keyword + win word" patterns
-  let homeScore = 0, awayScore = 0;
-  const posWords = ["win", "victory", "triumph", "dominant", "favorites", "edge", "stronger", "rolling", "sharp", "clinical", "solid", "unbeaten", "momentum"];
-  const negWords = ["freefall", "crisis", "struggling", "weak", "poor", "limping", "losing", "wobbling", "concerns", "vulnerable", "shaky"];
-
-  homeKeywords.forEach(function(k) {
-    posWords.forEach(function(w) {
-      if (textNorm.indexOf(k + " " + w) !== -1) homeScore += 2;
-      if (textNorm.indexOf(k + " is " + w) !== -1) homeScore += 2;
-      if (textNorm.indexOf(k + " have " + w) !== -1) homeScore += 2;
-      if (textNorm.indexOf(k + " are " + w) !== -1) homeScore += 2;
+    lossWords.forEach(function(w) {
+      if (textNorm.indexOf(k + " " + w) !== -1) awayWinCount += 1;
+      if (textNorm.indexOf(k + " is " + w) !== -1) awayWinCount += 1;
     });
-    negWords.forEach(function(w) {
-      if (textNorm.indexOf(k + " " + w) !== -1) awayScore += 1;
-      if (textNorm.indexOf(k + " is " + w) !== -1) awayScore += 1;
-      if (textNorm.indexOf(k + " are " + w) !== -1) awayScore += 1;
+  });
+  awayKws.forEach(function(k) {
+    winWords.forEach(function(w) {
+      if (textNorm.indexOf(k + " " + w) !== -1) awayWinCount += 2;
+      if (textNorm.indexOf(k + " is " + w) !== -1) awayWinCount += 2;
+      if (textNorm.indexOf(k + " have " + w) !== -1) awayWinCount += 2;
+    });
+    lossWords.forEach(function(w) {
+      if (textNorm.indexOf(k + " " + w) !== -1) homeWinCount += 1;
+      if (textNorm.indexOf(k + " is " + w) !== -1) homeWinCount += 1;
     });
   });
 
-  awayKeywords.forEach(function(k) {
-    posWords.forEach(function(w) {
-      if (textNorm.indexOf(k + " " + w) !== -1) awayScore += 2;
-      if (textNorm.indexOf(k + " is " + w) !== -1) awayScore += 2;
-      if (textNorm.indexOf(k + " have " + w) !== -1) awayScore += 2;
-      if (textNorm.indexOf(k + " are " + w) !== -1) awayScore += 2;
-    });
-    negWords.forEach(function(w) {
-      if (textNorm.indexOf(k + " " + w) !== -1) homeScore += 1;
-      if (textNorm.indexOf(k + " is " + w) !== -1) homeScore += 1;
-      if (textNorm.indexOf(k + " are " + w) !== -1) homeScore += 1;
-    });
-  });
-
-  if (homeScore > awayScore && homeScore >= 3) return "HOME";
-  if (awayScore > homeScore && awayScore >= 3) return "AWAY";
+  if (homeWinCount > awayWinCount && homeWinCount >= 3) return "HOME";
+  if (awayWinCount > homeWinCount && awayWinCount >= 3) return "AWAY";
 
   return null;
+}
+
+// STEP 3: Combine — try structured first, then text
+function getAIPrediction(match, aiText, homeTeam, awayTeam) {
+  const structured = getBzzoiroStructuredPrediction(match, homeTeam, awayTeam);
+  if (structured) return { winner: structured, source: "structured" };
+
+  const textBased = parseFromText(aiText, homeTeam, awayTeam);
+  if (textBased) return { winner: textBased, source: "text" };
+
+  return { winner: null, source: "none" };
 }
 
 function analyzeMatch(match) {
@@ -243,7 +284,6 @@ function analyzeMatch(match) {
 
   const baseXg = leagueXg(leagueName);
   const drawFactor = leagueDraw(leagueName);
-
   const homeHash = hashString(homeTeamName);
   const awayHash = hashString(awayTeamName);
 
@@ -271,7 +311,6 @@ function analyzeMatch(match) {
 
   homeXg = Math.max(0.5, Math.min(4.0, homeXg));
   awayXg = Math.max(0.4, Math.min(3.8, awayXg));
-
   const totalXg = homeXg + awayXg;
 
   const diff = homeXg - awayXg;
@@ -284,28 +323,18 @@ function analyzeMatch(match) {
   drawProb = Math.max(10, Math.min(40, drawProb));
 
   let aiPreview = "";
-  if (match.ai_preview && match.ai_preview.text) {
-    aiPreview = match.ai_preview.text;
-  }
+  if (match.ai_preview && match.ai_preview.text) aiPreview = match.ai_preview.text;
 
-  let aiPredictedWinner = null;
+  const aiResult = getAIPrediction(match, aiPreview, homeTeamName, awayTeamName);
+  const aiPredictedWinner = aiResult.winner;
+  const aiSource = aiResult.source;
 
-  if (aiPreview) {
-    aiPredictedWinner = parseAIPrediction(aiPreview, homeTeamName, awayTeamName);
-
-    if (aiPredictedWinner === "HOME") {
-      homeWinProb = 60;
-      drawProb = 22;
-      awayWinProb = 18;
-    } else if (aiPredictedWinner === "AWAY") {
-      awayWinProb = 60;
-      drawProb = 22;
-      homeWinProb = 18;
-    } else if (aiPredictedWinner === "DRAW") {
-      drawProb = 38;
-      homeWinProb = 31;
-      awayWinProb = 31;
-    }
+  if (aiPredictedWinner === "HOME") {
+    homeWinProb = 60; drawProb = 22; awayWinProb = 18;
+  } else if (aiPredictedWinner === "AWAY") {
+    awayWinProb = 60; drawProb = 22; homeWinProb = 18;
+  } else if (aiPredictedWinner === "DRAW") {
+    drawProb = 38; homeWinProb = 31; awayWinProb = 31;
   }
 
   const totalP = homeWinProb + awayWinProb + drawProb;
@@ -316,12 +345,9 @@ function analyzeMatch(match) {
   function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
   function poissonUnder(k, lambda) {
     let sum = 0;
-    for (let i = 0; i <= k; i++) {
-      sum += Math.exp(-lambda) * Math.pow(lambda, i) / factorial(i);
-    }
+    for (let i = 0; i <= k; i++) sum += Math.exp(-lambda) * Math.pow(lambda, i) / factorial(i);
     return Math.min(99, Math.max(1, sum * 100));
   }
-
   const under15 = Math.round(poissonUnder(1, totalXg));
   const under25 = Math.round(poissonUnder(2, totalXg));
   const under35 = Math.round(poissonUnder(3, totalXg));
@@ -386,6 +412,7 @@ function analyzeMatch(match) {
     },
     aiPreview: aiPreview,
     aiPredictedWinner: aiPredictedWinner,
+    aiSource: aiSource,
     probabilities: { homeWin: homeWinProb, draw: drawProb, awayWin: awayWinProb },
     expectedGoals: { home: homeXg.toFixed(2), away: awayXg.toFixed(2), total: totalXg.toFixed(2) },
     predictions: { matchResult: matchResultPrediction, doubleChance: doubleChancePrediction },
@@ -399,6 +426,8 @@ function analyzeMatch(match) {
     analysis: { confidence: confidence, safestBet: safestBet, probability: safestProb, verdict: verdict }
   };
 }
+
+// ============= ENDPOINTS =============
 
 app.get('/api/today', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
@@ -477,5 +506,28 @@ app.get('/api/live', async (req, res) => {
   }
 });
 
+// DEBUG ENDPOINT — shows raw Bzzoiro data
+app.get('/api/debug', async (req, res) => {
+  const API_KEY = process.env.BZZOIRO_API_KEY;
+  const teamName = req.query.teamName || 'Atletico';
+  if (!API_KEY) return res.status(500).json({ error: "No API key" });
+  try {
+    const url = "https://sports.bzzoiro.com/api/events/?team_name=" + encodeURIComponent(teamName) + "&limit=3";
+    const response = await axios.get(url, { headers: { Authorization: "Token " + API_KEY }, timeout: 10000 });
+    const data = response.data;
+    const results = data.results || [];
+    res.json({
+      debug: true,
+      searchTerm: teamName,
+      totalResults: results.length,
+      firstMatchKeys: results[0] ? Object.keys(results[0]) : [],
+      firstMatch: results[0] || null,
+      aiPreviewSample: results[0] && results[0].ai_preview ? results[0].ai_preview : null
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server running on port " + PORT));
+app.listen(PORT, () => console.log("Server running on port " + PORT))
