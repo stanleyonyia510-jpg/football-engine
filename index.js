@@ -74,53 +74,72 @@ function getTeamName(team) {
   return "Unknown";
 }
 
-function extractPredictedScore(aiText) {
-  if (!aiText) return null;
-  const patterns = [
-    /\\[^]+?\s(\d+)\s[-–]\s*(\d+)\s[^]+?\\*/,
-    /(\d+)\s*[-–]\s*(\d+)\s+(?:win|victory)/i,
-    /Prediction:\s*\\[^]+?(\d+)\s[-–]\s*(\d+)/i,
-    /(\d+)\s*[-–]\s*(\d+)/
-  ];
-  for (const pattern of patterns) {
-    const match = aiText.match(pattern);
-    if (match) {
-      const homeScore = parseInt(match[1]);
-      const awayScore = parseInt(match[2]);
-      if (homeScore >= 0 && homeScore <= 9 && awayScore >= 0 && awayScore <= 9) {
-        return { home: homeScore, away: awayScore };
-      }
-    }
-  }
-  return null;
+function normalizeTeamName(name) {
+  return (name || "").toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
 }
 
+// Extract the predicted winner from the AI text using team name matching
 function extractPredictedWinner(aiText, homeTeam, awayTeam) {
   if (!aiText) return null;
   const text = aiText.toLowerCase();
-  const homeLower = homeTeam.toLowerCase();
-  const awayLower = awayTeam.toLowerCase();
+  const homeNorm = normalizeTeamName(homeTeam);
+  const awayNorm = normalizeTeamName(awayTeam);
+  
+  // Get the last word of each team name (usually the most distinctive)
+  const homeWords = homeNorm.split(/\s+/).filter(function(w) { return w.length > 3; });
+  const awayWords = awayNorm.split(/\s+/).filter(function(w) { return w.length > 3; });
+  const homeKey = homeWords.length > 0 ? homeWords[homeWords.length - 1] : homeNorm;
+  const awayKey = awayWords.length > 0 ? awayWords[awayWords.length - 1] : awayNorm;
 
-  const homeWinPatterns = [
-    new RegExp(homeLower + '[^.]{0,80}(win|victory|triumph|favorites|edge|dominat)', 'i'),
-    new RegExp('(win|victory|triumph|favorites|edge|dominat)[^.]{0,80}' + homeLower, 'i')
-  ];
-  const awayWinPatterns = [
-    new RegExp(awayLower + '[^.]{0,80}(win|victory|triumph|favorites|edge|dominat)', 'i'),
-    new RegExp('(win|victory|triumph|favorites|edge|dominat)[^.]{0,80}' + awayLower, 'i')
-  ];
-  const drawPatterns = [
-    /(draw|1-1|0-0|2-2|stalemate|share the points)/i
-  ];
-
+  // Score each team based on proximity to win keywords
   let homeScore = 0, awayScore = 0, drawScore = 0;
-  homeWinPatterns.forEach(function(p) { if (p.test(text)) homeScore += 2; });
-  awayWinPatterns.forEach(function(p) { if (p.test(text)) awayScore += 2; });
-  drawPatterns.forEach(function(p) { if (p.test(text)) drawScore += 1; });
 
+  // Keywords that strongly indicate a winner
+  const homeWinKeywords = [homeKey + ' win', homeKey + ' victory', homeKey + ' triumph', 'favor ' + homeKey, homeKey + ' have the edge', homeKey + ' edge', homeKey + ' favorit'];
+  const awayWinKeywords = [awayKey + ' win', awayKey + ' victory', awayKey + ' triumph', 'favor ' + awayKey, awayKey + ' have the edge', awayKey + ' edge', awayKey + ' favorit'];
+  
+  homeWinKeywords.forEach(function(k) { if (text.indexOf(k) !== -1) homeScore += 3; });
+  awayWinKeywords.forEach(function(k) { if (text.indexOf(k) !== -1) awayScore += 3; });
+
+  // Look for "Prediction:" line with a score
+  const predictionMatch = aiText.match(/Prediction:\s*\\[^]?(\d+)\s*[-–]\s*(\d+)[^]?\\/i);
+  if (predictionMatch) {
+    const firstNum = parseInt(predictionMatch[1]);
+    const secondNum = parseInt(predictionMatch[2]);
+    // Find which team is mentioned immediately BEFORE the score
+    const beforeScoreText = aiText.substring(0, predictionMatch.index).toLowerCase();
+    const afterScoreText = aiText.substring(predictionMatch.index).toLowerCase();
+    
+    // Check the last 200 characters before the prediction
+    const context = beforeScoreText.slice(-200) + afterScoreText.slice(0, 100);
+    const homePos = context.lastIndexOf(homeKey);
+    const awayPos = context.lastIndexOf(awayKey);
+    
+    if (homePos > awayPos && homePos !== -1) {
+      // Home team mentioned more recently - home team is FIRST (winner if firstNum > secondNum)
+      if (firstNum > secondNum) homeScore += 5;
+      else if (secondNum > firstNum) awayScore += 5;
+      else drawScore += 3;
+    } else if (awayPos > homePos && awayPos !== -1) {
+      // Away team mentioned more recently - away team is FIRST
+      if (firstNum > secondNum) awayScore += 5;
+      else if (secondNum > firstNum) homeScore += 5;
+      else drawScore += 3;
+    } else {
+      // Fallback: assume home team first
+      if (firstNum > secondNum) homeScore += 3;
+      else if (secondNum > firstNum) awayScore += 3;
+      else drawScore += 2;
+    }
+  }
+
+  // Generic draw indicators
+  if (text.indexOf('draw') !== -1 || text.indexOf('stalemate') !== -1) drawScore += 1;
+
+  // Decide
   if (homeScore > awayScore && homeScore > drawScore) return "HOME";
   if (awayScore > homeScore && awayScore > drawScore) return "AWAY";
-  if (drawScore > 0) return "DRAW";
+  if (drawScore > homeScore && drawScore > awayScore) return "DRAW";
   return null;
 }
 
@@ -180,32 +199,21 @@ function analyzeMatch(match) {
   }
 
   let aiPredictedWinner = null;
-  let aiPredictedScore = null;
-
   if (aiPreview) {
-    aiPredictedScore = extractPredictedScore(aiPreview);
     aiPredictedWinner = extractPredictedWinner(aiPreview, homeTeamName, awayTeamName);
 
-    if (aiPredictedScore) {
-      if (aiPredictedScore.home > aiPredictedScore.away) aiPredictedWinner = "HOME";
-      else if (aiPredictedScore.away > aiPredictedScore.home) aiPredictedWinner = "AWAY";
-      else aiPredictedWinner = "DRAW";
-    }
-
     if (aiPredictedWinner === "HOME") {
-      homeWinProb = Math.max(52, homeWinProb);
-      homeWinProb = Math.min(homeWinProb, 75);
-      awayWinProb = Math.min(awayWinProb, 25);
+      homeWinProb = Math.max(55, homeWinProb);
+      awayWinProb = Math.min(awayWinProb, 20);
       drawProb = 100 - homeWinProb - awayWinProb;
     } else if (aiPredictedWinner === "AWAY") {
-      awayWinProb = Math.max(52, awayWinProb);
-      awayWinProb = Math.min(awayWinProb, 75);
-      homeWinProb = Math.min(homeWinProb, 25);
+      awayWinProb = Math.max(55, awayWinProb);
+      homeWinProb = Math.min(homeWinProb, 20);
       drawProb = 100 - homeWinProb - awayWinProb;
     } else if (aiPredictedWinner === "DRAW") {
-      drawProb = Math.max(30, drawProb);
-      homeWinProb = Math.min(homeWinProb, 40);
-      awayWinProb = Math.min(awayWinProb, 40);
+      drawProb = Math.max(32, drawProb);
+      homeWinProb = Math.min(homeWinProb, 36);
+      awayWinProb = Math.min(awayWinProb, 36);
       const rem = 100 - drawProb;
       homeWinProb = Math.round(rem / 2);
       awayWinProb = 100 - drawProb - homeWinProb;
@@ -239,7 +247,7 @@ function analyzeMatch(match) {
   if (status === 'finished') confidence += 40;
   if (status === 'live' || status === 'inprogress' || status === '2nd_half') confidence += 30;
   if (hasScore) confidence += 15;
-  if (aiPreview && aiPreview.length > 100) confidence += 15;
+  if (aiPreview && aiPreview.length > 100) confidence += 20;
   confidence = Math.min(95, confidence);
 
   let matchResultPrediction = "DRAW";
@@ -290,7 +298,6 @@ function analyzeMatch(match) {
     },
     aiPreview: aiPreview,
     aiPredictedWinner: aiPredictedWinner,
-    aiPredictedScore: aiPredictedScore,
     probabilities: { homeWin: homeWinProb, draw: drawProb, awayWin: awayWinProb },
     expectedGoals: { home: homeXg.toFixed(2), away: awayXg.toFixed(2), total: totalXg.toFixed(2) },
     predictions: { matchResult: matchResultPrediction, doubleChance: doubleChancePrediction },
@@ -305,7 +312,6 @@ function analyzeMatch(match) {
   };
 }
 
-// TODAY ENDPOINT
 app.get('/api/today', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
@@ -321,7 +327,6 @@ app.get('/api/today', async (req, res) => {
   }
 });
 
-// SEARCH ENDPOINT
 app.get('/api/analyze', async (req, res) => {
   const teamName = req.query.teamName || '';
   const API_KEY = process.env.BZZOIRO_API_KEY;
@@ -343,7 +348,6 @@ app.get('/api/analyze', async (req, res) => {
   }
 });
 
-// SINGLE MATCH ENDPOINT - analyzes one match by ID
 app.get('/api/analyze-one', async (req, res) => {
   const matchId = req.query.id;
   const API_KEY = process.env.BZZOIRO_API_KEY;
@@ -353,9 +357,7 @@ app.get('/api/analyze-one', async (req, res) => {
     const url = "https://sports.bzzoiro.com/api/events/" + matchId + "/";
     const response = await axios.get(url, { headers: { Authorization: "Token " + API_KEY }, timeout: 10000 });
     const match = response.data;
-    if (!match || !match.id) {
-      return res.status(404).json({ error: "Match not found." });
-    }
+    if (!match || !match.id) return res.status(404).json({ error: "Match not found." });
     const analyzed = analyzeMatch(match);
     res.json({ status: "success", match: analyzed });
   } catch (error) {
@@ -363,19 +365,16 @@ app.get('/api/analyze-one', async (req, res) => {
   }
 });
 
-// LIVE MATCHES ENDPOINT
 app.get('/api/live', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
   try {
-    // Try the live endpoint first
     let rawEvents = [];
     try {
       const liveUrl = "https://sports.bzzoiro.com/api/events/live/";
       const liveResponse = await axios.get(liveUrl, { headers: { Authorization: "Token " + API_KEY }, timeout: 10000 });
       rawEvents = liveResponse.data.results || [];
     } catch (e) {
-      // Fallback: get all and filter for live
       const listResponse = await axios.get("https://sports.bzzoiro.com/api/events/?limit=50", { headers: { Authorization: "Token " + API_KEY }, timeout: 10000 });
       const all = listResponse.data.results || [];
       rawEvents = all.filter(function(m) {
