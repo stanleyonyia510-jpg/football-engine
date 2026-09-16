@@ -51,32 +51,6 @@
         .loading { text-align: center; padding: 40px; color: #94a3b8; }
         .hidden { display: none; }
         h3 { margin-top: 20px; margin-bottom: 10px; font-size: 1.1rem; color: #cbd5e1; }
-
-        /* WAKING UP MESSAGE */
-        .wakeup-box {
-            background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
-            border-radius: 16px;
-            padding: 30px;
-            text-align: center;
-            margin-top: 20px;
-            border: 1px solid #3b82f6;
-        }
-        .wakeup-spinner {
-            display: inline-block;
-            width: 50px;
-            height: 50px;
-            border: 5px solid rgba(59, 130, 246, 0.3);
-            border-top-color: #3b82f6;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-bottom: 20px;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .wakeup-title { color: #93c5fd; font-size: 1.3rem; font-weight: 700; margin-bottom: 10px; }
-        .wakeup-text { color: #dbeafe; font-size: 1rem; line-height: 1.6; }
-        .wakeup-countdown { color: #60a5fa; font-size: 0.9rem; margin-top: 15px; font-weight: 600; }
-
-        /* CHART STYLES */
         .chart-bar-container { margin-top: 10px; }
         .chart-row { display: flex; align-items: center; margin-bottom: 8px; }
         .chart-label { width: 100px; color: #94a3b8; font-size: 0.85rem; }
@@ -102,14 +76,7 @@
             <button id="searchBtn" onclick="analyze()">Search</button>
         </div>
 
-        <div id="wakeup" class="wakeup-box hidden">
-            <div class="wakeup-spinner"></div>
-            <div class="wakeup-title">☕ Waking up the server...</div>
-            <div class="wakeup-text">Our free server went to sleep to save energy. It will be ready in a few seconds. Please wait.</div>
-            <div class="wakeup-countdown" id="countdown">Retrying in 5 seconds...</div>
-        </div>
-
-        <div id="loading" class="loading hidden">Loading matches...</div>
+        <div id="loading" class="loading">☕ Loading matches... Please wait 30-60 seconds (server may be waking up)</div>
         <div id="error" class="error hidden"></div>
         <div id="sectionTitle" class="section-title hidden"></div>
         <div id="results"></div>
@@ -131,14 +98,18 @@
         }
 
         function makeLogo(name) {
-            const initials = teamInitials(name);
-            const color = teamColor(name);
-            const svg = <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="${color}"/><text x="32" y="42" font-family="Arial,sans-serif" font-size="28" font-weight="bold" fill="white" text-anchor="middle">${initials}</text></svg>;
-            return 'data:image/svg+xml;base64,' + btoa(svg);
+            try {
+                const initials = teamInitials(name);
+                const color = teamColor(name);
+                const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="' + color + '"/><text x="32" y="42" font-family="Arial,sans-serif" font-size="28" font-weight="bold" fill="white" text-anchor="middle">' + initials + '</text></svg>';
+                return 'data:image/svg+xml;base64,' + btoa(svg);
+            } catch (e) {
+                return '';
+            }
         }
 
         function renderChart(label, value, colorClass) {
-            return <div class="chart-row"><div class="chart-label">${label}</div><div class="chart-bar-bg"><div class="chart-bar ${colorClass}" style="width: ${value}%"></div></div><div class="chart-value">${value}%</div></div>;
+            return '<div class="chart-row"><div class="chart-label">' + label + '</div><div class="chart-bar-bg"><div class="chart-bar ' + colorClass + '" style="width: ' + value + '%"></div></div><div class="chart-value">' + value + '%</div></div>';
         }
 
         function renderMatches(matches, title) {
@@ -149,8 +120,8 @@
 
             matches.forEach(function(m) {
                 let verdictClass = 'nobet';
-                if (m.analysis.verdict.includes('BET')) verdictClass = 'bet';
-                if (m.analysis.verdict.includes('WAIT')) verdictClass = 'wait';
+                if (m.analysis.verdict.indexOf('BET') !== -1) verdictClass = 'bet';
+                if (m.analysis.verdict.indexOf('WAIT') !== -1) verdictClass = 'wait';
 
                 let statusClass = 'status-upcoming';
                 let statusText = 'UPCOMING';
@@ -164,11 +135,11 @@
                 html += '<div class="match-header">';
                 html += '<div>';
                 html += '<div class="teams-row">';
-                html += '<img src="' + homeLogo + '" class="team-logo" alt="' + m.match.home + '">';
+                if (homeLogo) html += '<img src="' + homeLogo + '" class="team-logo" alt="">';
                 html += '<span class="teams">' + m.match.home + '</span>';
                 html += '<span class="vs">vs</span>';
                 html += '<span class="teams">' + m.match.away + '</span>';
-                html += '<img src="' + awayLogo + '" class="team-logo" alt="' + m.match.away + '">';
+                if (awayLogo) html += '<img src="' + awayLogo + '" class="team-logo" alt="">';
                 html += '</div>';
                 html += '<div class="league">' + m.match.league + '</div>';
                 html += '<div class="status-badge ' + statusClass + '">' + statusText + '</div>';
@@ -221,76 +192,57 @@
             document.getElementById('results').innerHTML = html;
         }
 
-        async function fetchWithRetry(url, maxRetries) {
-            const wakeup = document.getElementById('wakeup');
-            const countdown = document.getElementById('countdown');
+        async function loadToday() {
             const loading = document.getElementById('loading');
             const errorDiv = document.getElementById('error');
-
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                try {
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
-
-                    const response = await fetch(url, { signal: controller.signal });
-                    clearTimeout(timeoutId);
-                    const data = await response.json();
-
-                    // Success - hide wakeup, return data
-                    wakeup.classList.add('hidden');
-                    loading.classList.add('hidden');
-                    return data;
-
-                } catch (error) {
-                    // Show wakeup message on retries
-                    if (attempt < maxRetries) {
-                        wakeup.classList.remove('hidden');
-                        let secondsLeft = 5;
-                        countdown.textContent = 'Retrying in 5 seconds...';
-                        for (let s = 5; s > 0; s--) {
-                            countdown.textContent = 'Retrying in ' + s + ' seconds... (attempt ' + (attempt + 1) + ' of ' + maxRetries + ')';
-                            await new Promise(r => setTimeout(r, 1000));
-                        }
-                    } else {
-                        wakeup.classList.add('hidden');
-                        errorDiv.textContent = 'The server is taking too long. Please refresh the page.';
-                        errorDiv.classList.remove('hidden');
-                        return null;
-                    }
-                }
-            }
-            return null;
-        }
-
-        async function loadToday() {
-            document.getElementById('wakeup').classList.remove('hidden');
-            document.getElementById('error').classList.add('hidden');
+            loading.classList.remove('hidden');
+            errorDiv.classList.add('hidden');
             document.getElementById('results').innerHTML = '';
-
-            const data = await fetchWithRetry('https://football-engine.onrender.com/api/today', 5);
-
-            if (!data) return;
-            if (data.error) { document.getElementById('error').textContent = data.error; document.getElementById('error').classList.remove('hidden'); return; }
-            if (data.status === 'no_matches') { document.getElementById('error').textContent = data.message; document.getElementById('error').classList.remove('hidden'); return; }
-            renderMatches(data.matches, '📅 Latest Matches with Bzzoiro AI Analysis');
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(function() { controller.abort(); }, 90000);
+                const response = await fetch('https://football-engine.onrender.com/api/today', { signal: controller.signal });
+                clearTimeout(timeoutId);
+                const data = await response.json();
+                loading.classList.add('hidden');
+                if (data.error) { errorDiv.textContent = data.error; errorDiv.classList.remove('hidden'); return; }
+                if (data.status === 'no_matches') { errorDiv.textContent = data.message; errorDiv.classList.remove('hidden'); return; }
+                renderMatches(data.matches, '📅 Latest Matches');
+            } catch (error) {
+                loading.classList.add('hidden');
+                errorDiv.textContent = 'Server is taking too long to wake up. Please refresh the page in 30 seconds.';
+                errorDiv.classList.remove('hidden');
+            }
         }
 
         async function analyze() {
             const team = document.getElementById('teamInput').value;
             const btn = document.getElementById('searchBtn');
+            const loading = document.getElementById('loading');
+            const errorDiv = document.getElementById('error');
+            const results = document.getElementById('results');
             btn.disabled = true;
-            document.getElementById('error').classList.add('hidden');
-            document.getElementById('results').innerHTML = '';
-            document.getElementById('wakeup').classList.remove('hidden');
-
-            const data = await fetchWithRetry('https://football-engine.onrender.com/api/analyze?teamName=' + encodeURIComponent(team), 5);
-
-            btn.disabled = false;
-            if (!data) return;
-            if (data.status === 'no_matches') { document.getElementById('error').textContent = data.message; document.getElementById('error').classList.remove('hidden'); return; }
-            if (data.error) { document.getElementById('error').textContent = data.error; document.getElementById('error').classList.remove('hidden'); return; }
-            const title = team ? '🔍 Results for "' + team + '"' : '📅 Latest Matches';
-            renderMatches(data.matches, title);
+            loading.classList.remove('hidden');
+            errorDiv.classList.add('hidden');
+            results.innerHTML = '';
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(function() { controller.abort(); }, 90000);
+                const response = await fetch('https://football-engine.onrender.com/api/analyze?teamName=' + encodeURIComponent(team), { signal: controller.signal });
+                clearTimeout(timeoutId);
+                const data = await response.json();
+                loading.classList.add('hidden');
+                btn.disabled = false;
+                if (data.status === 'no_matches') { errorDiv.textContent = data.message; errorDiv.classList.remove('hidden'); return; }
+                if (data.error) { errorDiv.textContent = data.error; errorDiv.classList.remove('hidden'); return; }
+                const title = team ? '🔍 Results for "' + team + '"' : '📅 Latest Matches';
+                renderMatches(data.matches, title);
+            } catch (error) {
+                loading.classList.add('hidden');
+                btn.disabled = false;
+                errorDiv.textContent = 'Server is taking too long. Please refresh in 30 seconds.';
+                errorDiv.classList.remove('hidden');
+            }
         }
 
         document.getElementById('teamInput').addEventListener('keypress', function(e) {
