@@ -74,7 +74,6 @@ function getTeamName(team) {
   return "Unknown";
 }
 
-// Strip accents and lowercase
 function normalize(str) {
   return (str || "")
     .normalize("NFD")
@@ -85,135 +84,133 @@ function normalize(str) {
     .trim();
 }
 
-// Get distinctive keywords from team name
-function getKeywords(name) {
-  const stopWords = ["fc", "sc", "cf", "ac", "afc", "the", "and", "city", "club", "united", "de", "do", "da", "aif", "if", "sk", "cd", "ii", "iii"];
-  return normalize(name).split(" ").filter(function(w) { return w.length > 3 && stopWords.indexOf(w) === -1; });
-}
-
-// ====================== THE FINAL PARSER ======================
+// ====================== FINAL SIMPLE PARSER ======================
+// Bzzoiro always writes: "Prediction:\n\n*WinningTeam X-Y LosingTeam.*"
+// We extract the bolded prediction line and read it directly.
 function parseAIPrediction(aiText, homeTeam, awayTeam) {
   if (!aiText) return null;
 
-  const homeKeywords = getKeywords(homeTeam);
-  const awayKeywords = getKeywords(awayTeam);
+  const homeNorm = normalize(homeTeam);
+  const awayNorm = normalize(awayTeam);
 
-  // Helper: Which team does a given phrase belong to?
-  function whichTeam(phrase) {
-    const phraseNorm = normalize(phrase);
-    let homeFound = false, awayFound = false;
-    homeKeywords.forEach(function(k) { if (phraseNorm.indexOf(k) !== -1) homeFound = true; });
-    awayKeywords.forEach(function(k) { if (phraseNorm.indexOf(k) !== -1) awayFound = true; });
-    if (homeFound && !awayFound) return "HOME";
-    if (awayFound && !homeFound) return "AWAY";
-    return null;
+  // Split team names into first word (like "Sfaxien" from "CS Sfaxien")
+  function firstWord(name) {
+    const parts = name.split(" ").filter(function(p) { return p.length > 2; });
+    return parts.length > 0 ? parts[parts.length - 1] : name;
   }
+  const homeKey = firstWord(homeNorm);
+  const awayKey = firstWord(awayNorm);
 
-  // ============ METHOD 1: The "Prediction:" section ============
-  // Bzzoiro always writes: "Prediction:\n\n*WinningTeam X-Y LosingTeam.*"
+  // ============ METHOD 1: The "Prediction:" bold line ============
+  // Matches: Prediction:\n\n*Winner 2-0 Loser.* OR Prediction: *Winner 2-0 Loser*
   const predMatch = aiText.match(/Prediction:\s*\n*\s*\\([^]+?)\\*/i);
+
   if (predMatch) {
     const predLine = predMatch[1];
+    const predLineNorm = normalize(predLine);
 
-    // Find the score inside the prediction line
-    const scoreMatch = predLine.match(/(\d+)\s*[-–]\s*(\d+)/);
+    // Find the score (X-Y format)
+    const scoreMatch = predLineNorm.match(/(\d+)\s+(\d+)/) || predLine.match(/(\d+)\s*[-–]\s*(\d+)/);
+
     if (scoreMatch) {
-      const firstScore = parseInt(scoreMatch[1]);
-      const secondScore = parseInt(scoreMatch[2]);
-
-      // Find what's BEFORE the score in the prediction line
-      const beforeScore = predLine.substring(0, scoreMatch.index);
-      // Find what's AFTER the score
-      const afterScore = predLine.substring(scoreMatch.index + scoreMatch[0].length);
-
-      // Which team is mentioned before the score?
-      const teamBeforeScore = whichTeam(beforeScore);
-      // Which team is mentioned after the score?
-      const teamAfterScore = whichTeam(afterScore);
-
-      // Bzzoiro usually writes: "TeamX X-Y TeamY" where TeamX gets the first score
-      if (teamBeforeScore === "HOME") {
-        // Home team is first → home got firstScore, away got secondScore
-        if (firstScore > secondScore) return "HOME";
-        if (secondScore > firstScore) return "AWAY";
-        return "DRAW";
+      // Get the part of the line BEFORE the score
+      let beforeScore;
+      if (scoreMatch.index !== undefined) {
+        beforeScore = normalize(predLine.substring(0, scoreMatch.index));
+      } else {
+        beforeScore = predLineNorm;
       }
-      if (teamBeforeScore === "AWAY") {
-        // Away team is first → away got firstScore, home got secondScore
-        if (firstScore > secondScore) return "AWAY";
-        if (secondScore > firstScore) return "HOME";
-        return "DRAW";
-      }
-      // Fallback: if we can't tell who's first, use score order (home first)
-      if (teamAfterScore) {
-        // Team after the score = the loser usually
-        if (teamAfterScore === "HOME") {
-          // Home is after score = home lost
-          if (firstScore > secondScore) return "AWAY";
-          if (secondScore > firstScore) return "HOME";
+
+      // Check which team is in the "beforeScore" part
+      const homeInBefore = beforeScore.indexOf(homeKey) !== -1;
+      const awayInBefore = beforeScore.indexOf(awayKey) !== -1;
+
+      if (homeInBefore && !awayInBefore) return "HOME";
+      if (awayInBefore && !homeInBefore) return "AWAY";
+
+      // If neither matched, try the whole prediction line
+      const homeInLine = predLineNorm.indexOf(homeKey) !== -1;
+      const awayInLine = predLineNorm.indexOf(awayKey) !== -1;
+
+      if (homeInLine && !awayInLine) return "HOME";
+      if (awayInLine && !homeInLine) return "AWAY";
+
+      // If both, check position — the one mentioned first is likely the winner
+      const homePos = predLineNorm.indexOf(homeKey);
+      const awayPos = predLineNorm.indexOf(awayKey);
+      if (homePos !== -1 && awayPos !== -1) {
+        const hScore = parseInt(scoreMatch[1]);
+        const aScore = parseInt(scoreMatch[2]);
+        if (homePos < awayPos) {
+          if (hScore > aScore) return "HOME";
+          if (aScore > hScore) return "AWAY";
           return "DRAW";
-        }
-        if (teamAfterScore === "AWAY") {
-          if (firstScore > secondScore) return "HOME";
-          if (secondScore > firstScore) return "AWAY";
+        } else {
+          if (hScore > aScore) return "AWAY";
+          if (aScore > hScore) return "HOME";
           return "DRAW";
         }
       }
     }
-
-    // No score — just check who's mentioned in the prediction
-    const teamInPred = whichTeam(predLine);
-    if (teamInPred) return teamInPred;
   }
 
-  // ============ METHOD 2: "Lean X to win" / "Back X" / "Favor X" ============
-  const leanPatterns = [
-    /lean\s+(?:towards?\s+)?([a-z0-9 ]{4,40}?)\s+to/i,
-    /back(?:ing)?\s+([a-z0-9 ]{4,40}?)\s+to/i,
-    /favor(?:ing)?\s+([a-z0-9 ]{4,40}?)\s+to/i,
-    /expect\s+([a-z0-9 ]{4,40}?)\s+to/i
-  ];
+  // ============ METHOD 2: "Lean X to..." / "Back X" / "Favor X" ============
   const textNorm = normalize(aiText);
+  const leanPatterns = [
+    /lean\s+(?:towards?\s+)?([a-z0-9 ]{3,30}?)\s+to/i,
+    /back(?:ing)?\s+([a-z0-9 ]{3,30}?)\s+to/i,
+    /favor(?:ing)?\s+([a-z0-9 ]{3,30}?)\s+to/i,
+    /expect\s+([a-z0-9 ]{3,30}?)\s+to/i,
+    /([a-z0-9 ]{3,30}?)\s+to\s+(?:win|snatch|take|grind|continue)/i
+  ];
   for (let i = 0; i < leanPatterns.length; i++) {
     const m = textNorm.match(leanPatterns[i]);
     if (m && m[1]) {
-      const team = whichTeam(m[1]);
-      if (team) return team;
+      const phrase = m[1];
+      if (phrase.indexOf(homeKey) !== -1 && phrase.indexOf(awayKey) === -1) return "HOME";
+      if (phrase.indexOf(awayKey) !== -1 && phrase.indexOf(homeKey) === -1) return "AWAY";
     }
   }
 
-  // ============ METHOD 3: "X win" / "X victory" / "X edge" ============
+  // ============ METHOD 3: Bold headline winner phrases ============
+  const boldMatches = aiText.match(/\\([^]+?)\\*/g);
+  if (boldMatches) {
+    let homeWins = 0, awayWins = 0;
+    const winPhrases = ["rolling", "favorites", "favorit", "dominat", "have the edge", "win", "victor", "sharp", "clinical", "strong", "unbeaten", "on form"];
+    const lossPhrases = ["freefall", "crisis", "struggling", "weak", "poor", "limping", "losing", "wobbling", "vulnerable", "in freefall"];
+    
+    boldMatches.forEach(function(bold) {
+      const bLower = normalize(bold);
+      const homeInBold = bLower.indexOf(homeKey) !== -1;
+      const awayInBold = bLower.indexOf(awayKey) !== -1;
+      winPhrases.forEach(function(w) {
+        if (homeInBold && bLower.indexOf(w) !== -1) homeWins += 2;
+        if (awayInBold && bLower.indexOf(w) !== -1) awayWins += 2;
+      });
+      lossPhrases.forEach(function(w) {
+        if (homeInBold && bLower.indexOf(w) !== -1) awayWins += 1;
+        if (awayInBold && bLower.indexOf(w) !== -1) homeWins += 1;
+      });
+    });
+    if (homeWins > awayWins && homeWins >= 2) return "HOME";
+    if (awayWins > homeWins && awayWins >= 2) return "AWAY";
+  }
+
+  // ============ METHOD 4: "X win" or "X have the edge" proximity ============
   let homeScore = 0, awayScore = 0;
-  const winWords = ["win", "victory", "triumph", "dominant", "favorites", "favorit", "edge", "rolling", "sharp", "clinical", "stronger", "unbeaten", "momentum", "in form", "rolling"];
-  const lossWords = ["freefall", "crisis", "struggling", "weak", "limping", "losing", "wobbling", "vulnerable", "shaky", "poor form"];
-
-  homeKeywords.forEach(function(k) {
-    winWords.forEach(function(w) {
-      if (textNorm.indexOf(k + " " + w) !== -1) homeScore += 2;
-      if (textNorm.indexOf(k + " is " + w) !== -1) homeScore += 2;
-      if (textNorm.indexOf(k + " have " + w) !== -1) homeScore += 2;
-      if (textNorm.indexOf(k + " are " + w) !== -1) homeScore += 2;
-    });
-    lossWords.forEach(function(w) {
-      if (textNorm.indexOf(k + " " + w) !== -1) awayScore += 1;
-      if (textNorm.indexOf(k + " is " + w) !== -1) awayScore += 1;
-      if (textNorm.indexOf(k + " are " + w) !== -1) awayScore += 1;
-    });
-  });
-
-  awayKeywords.forEach(function(k) {
-    winWords.forEach(function(w) {
-      if (textNorm.indexOf(k + " " + w) !== -1) awayScore += 2;
-      if (textNorm.indexOf(k + " is " + w) !== -1) awayScore += 2;
-      if (textNorm.indexOf(k + " have " + w) !== -1) awayScore += 2;
-      if (textNorm.indexOf(k + " are " + w) !== -1) awayScore += 2;
-    });
-    lossWords.forEach(function(w) {
-      if (textNorm.indexOf(k + " " + w) !== -1) homeScore += 1;
-      if (textNorm.indexOf(k + " is " + w) !== -1) homeScore += 1;
-      if (textNorm.indexOf(k + " are " + w) !== -1) homeScore += 1;
-    });
-  });
+  const winWords = ["win", "victory", "triumph", "dominant", "favorites", "edge", "stronger", "rolling", "sharp", "clinical", "unbeaten"];
+  
+  if (textNorm.indexOf(homeKey + " win") !== -1) homeScore += 3;
+  if (textNorm.indexOf(homeKey + " victory") !== -1) homeScore += 3;
+  if (textNorm.indexOf(homeKey + " have the edge") !== -1) homeScore += 3;
+  if (textNorm.indexOf(homeKey + " to win") !== -1) homeScore += 3;
+  if (textNorm.indexOf(homeKey + " to snatch") !== -1) homeScore += 3;
+  
+  if (textNorm.indexOf(awayKey + " win") !== -1) awayScore += 3;
+  if (textNorm.indexOf(awayKey + " victory") !== -1) awayScore += 3;
+  if (textNorm.indexOf(awayKey + " have the edge") !== -1) awayScore += 3;
+  if (textNorm.indexOf(awayKey + " to win") !== -1) awayScore += 3;
+  if (textNorm.indexOf(awayKey + " to snatch") !== -1) awayScore += 3;
 
   if (homeScore > awayScore && homeScore >= 3) return "HOME";
   if (awayScore > homeScore && awayScore >= 3) return "AWAY";
@@ -277,6 +274,7 @@ function analyzeMatch(match) {
     aiPredictedWinner = parseAIPrediction(aiPreview, homeTeamName, awayTeamName);
   }
 
+  // OVERRIDE: When AI has a clear winner, use it
   if (aiPredictedWinner === "HOME") {
     homeWinProb = 60; drawProb = 22; awayWinProb = 18;
   } else if (aiPredictedWinner === "AWAY") {
@@ -435,4 +433,4 @@ app.get('/api/live', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server running on port " + PORT));
+app.listen(PORT, () => console.log("Server running on port " + PORT))
