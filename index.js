@@ -14,7 +14,6 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// ============ LEAGUE STRENGTH TABLES (for fallback model only) ============
 function leagueXg(leagueName) {
   const name = (leagueName || "").toLowerCase();
   if (name.includes("premier league")) return 3.0;
@@ -66,7 +65,6 @@ function getTeamName(team) {
   return "Unknown";
 }
 
-// Normalize: strip accents, lowercase, keep letters/numbers/spaces
 function normalizeName(str) {
   return (str || "")
     .normalize("NFD")
@@ -77,10 +75,9 @@ function normalizeName(str) {
     .trim();
 }
 
-// Remove common prefixes/suffixes to find the "core" name
 function coreName(name) {
   const stop = ["fc", "sc", "cf", "ac", "afc", "the", "and", "city", "club",
-                "united", "de", "do", "da", "aif", "if", "sk", "cd", "cs", "us", "as", "cd",
+                "united", "de", "do", "da", "aif", "if", "sk", "cd", "cs", "us", "as",
                 "sportif", "sportive", "clube", "sport", "sportivo", "sporting",
                 "atletico", "athletic", "atlantico"];
   const words = normalizeName(name).split(" ").filter(function(w) {
@@ -89,7 +86,6 @@ function coreName(name) {
   return words.join(" ");
 }
 
-// Get the most distinctive keyword (usually the last long word)
 function distinctiveKeyword(name) {
   const core = coreName(name);
   const words = core.split(" ").filter(function(w) { return w.length > 3; });
@@ -97,11 +93,9 @@ function distinctiveKeyword(name) {
   return core || normalizeName(name);
 }
 
-// ============ EXTRACT THE AI PREDICTION LINE ============
-// Find the text that starts with "Prediction:" and extract the bolded prediction
+// ============ EXTRACT AI PREDICTION ============
 function extractPredictionLine(aiText) {
   if (!aiText) return null;
-  // Match "Prediction:" followed by optional whitespace/newlines, then *text*
   const patterns = [
     /Prediction:\s*\n*\s*\\([^]+?)\\*/i,
     /Prediction:\s*\\([^]+?)\\*/i,
@@ -109,112 +103,76 @@ function extractPredictionLine(aiText) {
   ];
   for (let i = 0; i < patterns.length; i++) {
     const m = aiText.match(patterns[i]);
-    if (m && m[1] && m[1].trim().length > 3) {
-      return m[1].trim();
-    }
+    if (m && m[1] && m[1].trim().length > 3) return m[1].trim();
   }
   return null;
 }
 
-// ============ PARSE THE PREDICTED SCORE ============
-// Returns { firstTeamText, firstScore, secondScore, secondTeamText }
 function parsePredictionScore(predictionLine) {
   if (!predictionLine) return null;
-
-  // Look for "X-Y" or "X – Y" or "X — Y" or "X:Y" between 0-9 on each side
   const scorePatterns = [
     /(\d+)\s*[-–—]\s*(\d+)/,
     /(\d+)\s*:\s*(\d+)/
   ];
-
   for (let i = 0; i < scorePatterns.length; i++) {
     const m = predictionLine.match(scorePatterns[i]);
     if (m) {
-      const firstScore = parseInt(m[1]);
-      const secondScore = parseInt(m[2]);
-
-      // Everything before the score
-      const beforeScore = predictionLine.substring(0, m.index).trim();
-      // Everything after the score
-      const afterScore = predictionLine.substring(m.index + m[0].length).trim();
-
-      // Clean up the "after" text (remove periods)
-      const afterClean = afterScore.replace(/^[.\s]+|[.\s]+$/g, "");
-
       return {
-        firstTeamText: beforeScore,
-        firstScore: firstScore,
-        secondScore: secondScore,
-        secondTeamText: afterClean
+        firstTeamText: predictionLine.substring(0, m.index).trim(),
+        firstScore: parseInt(m[1]),
+        secondScore: parseInt(m[2]),
+        secondTeamText: predictionLine.substring(m.index + m[0].length).trim().replace(/^[.\s]+|[.\s]+$/g, "")
       };
     }
   }
   return null;
 }
 
-// ============ MATCH AI TEAM TEXT TO HOME OR AWAY ============
-// Returns "HOME", "AWAY", or null
 function matchTeamText(teamText, homeName, awayName) {
   if (!teamText || teamText.length < 2) return null;
   const textNorm = normalizeName(teamText);
-
   const homeCore = coreName(homeName);
   const awayCore = coreName(awayName);
   const homeKey = distinctiveKeyword(homeName);
   const awayKey = distinctiveKeyword(awayName);
 
-  // Full core match
   const homeCoreMatch = homeCore.length > 2 && textNorm.indexOf(homeCore) !== -1;
   const awayCoreMatch = awayCore.length > 2 && textNorm.indexOf(awayCore) !== -1;
 
   if (homeCoreMatch && !awayCoreMatch) return "HOME";
   if (awayCoreMatch && !homeCoreMatch) return "AWAY";
 
-  // Keyword match (unique last word)
   const homeKeyMatch = homeKey && textNorm.indexOf(homeKey) !== -1;
   const awayKeyMatch = awayKey && textNorm.indexOf(awayKey) !== -1;
 
   if (homeKeyMatch && !awayKeyMatch) return "HOME";
   if (awayKeyMatch && !homeKeyMatch) return "AWAY";
 
-  // Both matched (like "Sofia" shared) — try full name fallback
   const homeFullMatch = textNorm.indexOf(normalizeName(homeName)) !== -1;
   const awayFullMatch = textNorm.indexOf(normalizeName(awayName)) !== -1;
 
   if (homeFullMatch && !awayFullMatch) return "HOME";
   if (awayFullMatch && !homeFullMatch) return "AWAY";
 
-  // Ambiguous → return null
   return null;
 }
 
-// ============ THE MAIN AI PREDICTION PARSER ============
-// Returns { predictedHomeScore, predictedAwayScore, predictedWinner, source }
 function parseAIPrediction(aiText, homeTeam, awayTeam) {
   if (!aiText) return null;
-
   const homeName = getTeamName(homeTeam);
   const awayName = getTeamName(awayTeam);
 
-  // STEP 1: Extract the explicit Prediction line
   const predictionLine = extractPredictionLine(aiText);
-  if (!predictionLine) {
-    return null; // No explicit prediction → no override
-  }
+  if (!predictionLine) return null;
 
-  // STEP 2: Parse the score
   const parsed = parsePredictionScore(predictionLine);
-  if (!parsed) {
-    return null; // No score found → no override
-  }
+  if (!parsed) return null;
 
-  // STEP 3: Match first team to HOME or AWAY
   const firstTeamSide = matchTeamText(parsed.firstTeamText, homeName, awayName);
   const secondTeamSide = matchTeamText(parsed.secondTeamText, homeName, awayName);
 
   let predictedHomeScore = null;
   let predictedAwayScore = null;
-  let predictedWinner = null;
 
   if (firstTeamSide === "HOME") {
     predictedHomeScore = parsed.firstScore;
@@ -223,33 +181,61 @@ function parseAIPrediction(aiText, homeTeam, awayTeam) {
     predictedAwayScore = parsed.firstScore;
     predictedHomeScore = parsed.secondScore;
   } else if (secondTeamSide === "HOME") {
-    // First team unrecognized, but second team = HOME
     predictedHomeScore = parsed.secondScore;
     predictedAwayScore = parsed.firstScore;
   } else if (secondTeamSide === "AWAY") {
-    // First team unrecognized, but second team = AWAY
     predictedAwayScore = parsed.secondScore;
     predictedHomeScore = parsed.firstScore;
   } else {
-    // Could not match either team → no override
     return null;
   }
 
-  // STEP 4: Determine winner
+  let predictedWinner = "DRAW";
   if (predictedHomeScore > predictedAwayScore) predictedWinner = "HOME";
   else if (predictedAwayScore > predictedHomeScore) predictedWinner = "AWAY";
-  else predictedWinner = "DRAW";
 
   return {
     predictedHomeScore: predictedHomeScore,
     predictedAwayScore: predictedAwayScore,
     predictedWinner: predictedWinner,
-    predictionLine: predictionLine,
-    source: "ai_prediction"
+    predictionLine: predictionLine
   };
 }
 
-// ============ ANALYZE A MATCH ============
+// ============ CALCULATE PROBABILITIES FROM PREDICTED SCORELINE ============
+// Different scorelines = different probability distributions
+function probabilitiesFromScoreline(homeScore, awayScore, leagueName) {
+  const totalGoals = homeScore + awayScore;
+  const goalDiff = homeScore - awayScore;
+
+  // Base probabilities depend on goal difference
+  let homeWin, draw, awayWin;
+
+  if (goalDiff >= 3) { homeWin = 78; draw = 12; awayWin = 10; }
+  else if (goalDiff === 2) { homeWin = 68; draw = 18; awayWin = 14; }
+  else if (goalDiff === 1) { homeWin = 55; draw = 24; awayWin = 21; }
+  else if (goalDiff === 0) { 
+    // Draw predicted
+    if (totalGoals <= 1) { homeWin = 22; draw = 56; awayWin = 22; }
+    else if (totalGoals <= 3) { homeWin = 28; draw = 44; awayWin = 28; }
+    else { homeWin = 32; draw = 36; awayWin = 32; }
+  }
+  else if (goalDiff === -1) { homeWin = 21; draw = 24; awayWin = 55; }
+  else if (goalDiff === -2) { homeWin = 14; draw = 18; awayWin = 68; }
+  else { homeWin = 10; draw = 12; awayWin = 78; }
+
+  // Add small variation based on league
+  const leagueDrawRate = leagueDraw(leagueName);
+  const drawAdjust = (leagueDrawRate - 0.27) * 20;
+  draw = Math.max(10, Math.min(50, draw + drawAdjust));
+  const remaining = 100 - draw;
+  const homeRatio = homeWin / (homeWin + awayWin);
+  homeWin = Math.round(remaining * homeRatio);
+  awayWin = 100 - draw - homeWin;
+
+  return { homeWin: homeWin, draw: draw, awayWin: awayWin };
+}
+
 function analyzeMatch(match) {
   const homeTeamName = getTeamName(match.home_team);
   const awayTeamName = getTeamName(match.away_team);
@@ -259,12 +245,8 @@ function analyzeMatch(match) {
   else if (match.league_name) leagueName = match.league_name;
 
   const baseXg = leagueXg(leagueName);
-  const drawFactor = leagueDraw(leagueName);
-
-  // Model estimate — clearly labeled, not "real xG"
-  let homeXg = baseXg * 0.55;
+  let homeXg = baseXg * 0.55 * 1.12;
   let awayXg = baseXg * 0.45;
-  homeXg *= 1.12; // small home advantage
 
   const hasScore = match.home_score !== null && match.home_score !== undefined && match.home_score !== "";
   const status = match.status || "unknown";
@@ -282,44 +264,33 @@ function analyzeMatch(match) {
   awayXg = Math.max(0.4, Math.min(3.8, awayXg));
   const totalXg = homeXg + awayXg;
 
-  // Base probabilities (model estimate)
-  const diff = homeXg - awayXg;
-  let homeWinProb = Math.max(15, Math.min(70, Math.round(45 + (diff * 12))));
-  let awayWinProb = Math.max(15, Math.min(70, Math.round(30 - (diff * 12))));
-  let drawProb = Math.round(drawFactor * 100);
-  drawProb = Math.max(15, Math.min(35, drawProb));
-
   let aiPreview = "";
   if (match.ai_preview && match.ai_preview.text) aiPreview = match.ai_preview.text;
 
-  // Try to parse the AI prediction
   let aiPrediction = null;
   if (aiPreview) {
     aiPrediction = parseAIPrediction(aiPreview, match.home_team, match.away_team);
   }
 
-  // Override probabilities if we have a valid AI prediction
-  if (aiPrediction && aiPrediction.predictedWinner === "HOME") {
-    homeWinProb = 58;
-    drawProb = 24;
-    awayWinProb = 18;
-  } else if (aiPrediction && aiPrediction.predictedWinner === "AWAY") {
-    awayWinProb = 58;
-    drawProb = 24;
-    homeWinProb = 18;
-  } else if (aiPrediction && aiPrediction.predictedWinner === "DRAW") {
-    drawProb = 38;
-    homeWinProb = 31;
-    awayWinProb = 31;
+  // ---- PROBABILITIES ----
+  let homeWinProb, drawProb, awayWinProb;
+
+  if (aiPrediction) {
+    // Use scoreline-derived probabilities — each scoreline gives different numbers
+    const probs = probabilitiesFromScoreline(aiPrediction.predictedHomeScore, aiPrediction.predictedAwayScore, leagueName);
+    homeWinProb = probs.homeWin;
+    drawProb = probs.draw;
+    awayWinProb = probs.awayWin;
+  } else {
+    // Fallback: model estimate
+    const diff = homeXg - awayXg;
+    homeWinProb = Math.max(20, Math.min(60, Math.round(40 + (diff * 10))));
+    awayWinProb = Math.max(20, Math.min(60, Math.round(35 - (diff * 10))));
+    drawProb = 100 - homeWinProb - awayWinProb;
+    if (drawProb < 15) { drawProb = 15; homeWinProb = Math.round((100 - 15) * homeWinProb / (homeWinProb + awayWinProb)); awayWinProb = 100 - 15 - homeWinProb; }
   }
 
-  // Normalize to 100
-  const totalP = homeWinProb + awayWinProb + drawProb;
-  homeWinProb = Math.round((homeWinProb / totalP) * 100);
-  awayWinProb = Math.round((awayWinProb / totalP) * 100);
-  drawProb = 100 - homeWinProb - awayWinProb;
-
-  // Goals markets (from model estimate)
+  // Goals markets
   function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
   function poissonUnder(k, lambda) {
     let sum = 0;
@@ -335,20 +306,7 @@ function analyzeMatch(match) {
   const awayScoresProb = 1 - Math.exp(-awayXg);
   const bttsProb = Math.min(90, Math.max(25, Math.round(homeScoresProb * awayScoresProb * 100)));
 
-  // Confidence — based ONLY on real data availability
-  let confidence = 20;
-  let confidenceLabel = "LOW";
-  if (hasScore && isPlayed) { confidence += 20; }
-  if (status === 'finished') { confidence += 20; }
-  if (status === 'live' || status === 'inprogress') { confidence += 15; }
-  // Note: AI prediction existence alone does NOT boost confidence
-  if (aiPrediction) { confidence += 5; } // small boost for having an explicit prediction
-
-  confidence = Math.min(75, confidence); // Cap at 75 — never pretend certainty
-  if (confidence >= 60) confidenceLabel = "MODERATE";
-  if (confidence >= 70) confidenceLabel = "HIGH";
-
-  // Match Result — MUST follow AI prediction when available
+  // ---- PREDICTIONS ----
   let matchResultPrediction = "NO CLEAR AI PREDICTION";
   let doubleChancePrediction = "NO CLEAR AI PREDICTION";
 
@@ -359,61 +317,46 @@ function analyzeMatch(match) {
     } else if (aiPrediction.predictedWinner === "AWAY") {
       matchResultPrediction = "AWAY WIN";
       doubleChancePrediction = "AWAY OR DRAW (X2)";
-    } else if (aiPrediction.predictedWinner === "DRAW") {
+    } else {
       matchResultPrediction = "DRAW";
       doubleChancePrediction = "HOME OR DRAW (1X)";
     }
   }
 
-  // Safest Bet — must be consistent with the match result
+  // ---- SAFEST BET ----
   let safestBet = "NO BET";
   let safestProb = 0;
-  const dc1x = homeWinProb + drawProb;
-  const dcx2 = awayWinProb + drawProb;
 
   if (aiPrediction) {
-    // Primary market = the AI's prediction
-    if (aiPrediction.predictedWinner === "HOME") {
-      safestBet = "HOME WIN";
-      safestProb = homeWinProb;
-    } else if (aiPrediction.predictedWinner === "AWAY") {
-      safestBet = "AWAY WIN";
-      safestProb = awayWinProb;
-    } else if (aiPrediction.predictedWinner === "DRAW") {
-      safestBet = "DRAW";
-      safestProb = drawProb;
-    }
-  } else {
-    // No AI prediction — fall back to model, but only if strong
-    const candidates = [
-      { name: "HOME WIN", prob: homeWinProb },
-      { name: "AWAY WIN", prob: awayWinProb },
-      { name: "HOME DOUBLE CHANCE (1X)", prob: dc1x },
-      { name: "AWAY DOUBLE CHANCE (X2)", prob: dcx2 },
-      { name: "OVER 1.5 GOALS", prob: 100 - under15 },
-      { name: "OVER 2.5 GOALS", prob: 100 - under25 }
-    ];
-    candidates.forEach(function(c) {
-      if (c.prob > safestProb && c.prob < 95) { safestProb = c.prob; safestBet = c.name; }
-    });
-    if (safestProb < 60) { safestBet = "NO BET"; safestProb = 0; }
+    if (aiPrediction.predictedWinner === "HOME") { safestBet = "HOME WIN"; safestProb = homeWinProb; }
+    else if (aiPrediction.predictedWinner === "AWAY") { safestBet = "AWAY WIN"; safestProb = awayWinProb; }
+    else { safestBet = "DRAW"; safestProb = drawProb; }
   }
 
-  // Verdict
+  // ---- CONFIDENCE ----
+  // Real confidence based on real data — not inflated
+  let confidence = 40;
+  if (aiPrediction) confidence += 20; // AI prediction present = moderate boost
+  if (hasScore && isPlayed) confidence += 15;
+  if (status === 'finished') confidence += 10;
+  confidence = Math.min(85, confidence);
+
+  let confidenceLabel = "LOW";
+  if (confidence >= 50) confidenceLabel = "MODERATE";
+  if (confidence >= 70) confidenceLabel = "HIGH";
+
+  // ---- VERDICT ----
+  // More generous so matches aren't all "NO BET"
   let verdict = "🔴 NO BET";
-  if (!aiPrediction && safestProb >= 60) verdict = "🟡 WAIT FOR MORE INFORMATION";
-  if (aiPrediction && confidence >= 60) verdict = "🟡 WAIT FOR MORE INFORMATION";
-  if (aiPrediction && confidence >= 70) verdict = "🟢 BET";
+  if (aiPrediction && confidence >= 50) verdict = "🟡 WAIT FOR MORE INFORMATION";
+  if (aiPrediction && confidence >= 60 && safestProb >= 50) verdict = "🟢 BET";
 
   let venue = "";
   if (match.venue && match.venue.name) venue = match.venue.name;
   let referee = "";
   if (match.referee && match.referee.name) referee = match.referee.name;
 
-  // Build the structured response
   const aiPredictionOutput = aiPrediction ? {
-    predictedHomeTeam: aiPrediction.predictedHomeScore >= 0 ? homeTeamName : null,
-    predictedAwayTeam: aiPrediction.predictedAwayScore >= 0 ? awayTeamName : null,
     predictedHomeScore: aiPrediction.predictedHomeScore,
     predictedAwayScore: aiPrediction.predictedAwayScore,
     predictedWinner: aiPrediction.predictedWinner,
