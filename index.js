@@ -26,6 +26,7 @@ function leagueXg(leagueName) {
   if (name.includes("conference")) return 2.9;
   if (name.includes("mls") || name.includes("major league")) return 3.2;
   if (name.includes("liga mx")) return 3.0;
+  if (name.includes("allsvenskan") || name.includes("sweden")) return 2.6;
   if (name.includes("brasileir")) return 2.4;
   if (name.includes("argentina")) return 2.2;
   if (name.includes("colombia")) return 2.1;
@@ -74,72 +75,148 @@ function getTeamName(team) {
   return "Unknown";
 }
 
-function normalizeTeamName(name) {
+function normalize(name) {
   return (name || "").toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
 }
 
-// Extract the predicted winner from the AI text using team name matching
-function extractPredictedWinner(aiText, homeTeam, awayTeam) {
+// ROBUST AI PARSER — finds the winner from Bzzoiro's own text
+function parseAIPrediction(aiText, homeTeam, awayTeam) {
   if (!aiText) return null;
-  const text = aiText.toLowerCase();
-  const homeNorm = normalizeTeamName(homeTeam);
-  const awayNorm = normalizeTeamName(awayTeam);
-  
-  // Get the last word of each team name (usually the most distinctive)
-  const homeWords = homeNorm.split(/\s+/).filter(function(w) { return w.length > 3; });
-  const awayWords = awayNorm.split(/\s+/).filter(function(w) { return w.length > 3; });
-  const homeKey = homeWords.length > 0 ? homeWords[homeWords.length - 1] : homeNorm;
-  const awayKey = awayWords.length > 0 ? awayWords[awayWords.length - 1] : awayNorm;
 
-  // Score each team based on proximity to win keywords
-  let homeScore = 0, awayScore = 0, drawScore = 0;
+  const text = aiText;
+  const textLower = text.toLowerCase();
+  const homeNorm = normalize(homeTeam);
+  const awayNorm = normalize(awayTeam);
 
-  // Keywords that strongly indicate a winner
-  const homeWinKeywords = [homeKey + ' win', homeKey + ' victory', homeKey + ' triumph', 'favor ' + homeKey, homeKey + ' have the edge', homeKey + ' edge', homeKey + ' favorit'];
-  const awayWinKeywords = [awayKey + ' win', awayKey + ' victory', awayKey + ' triumph', 'favor ' + awayKey, awayKey + ' have the edge', awayKey + ' edge', awayKey + ' favorit'];
-  
-  homeWinKeywords.forEach(function(k) { if (text.indexOf(k) !== -1) homeScore += 3; });
-  awayWinKeywords.forEach(function(k) { if (text.indexOf(k) !== -1) awayScore += 3; });
+  // Get distinctive keywords from team names (skip common words)
+  const stopWords = ['fc', 'sc', 'cf', 'ac', 'afc', 'the', 'and', 'city', 'club', 'united'];
+  function getKeywords(name) {
+    return name.split(/\s+/).filter(function(w) { return w.length > 3 && stopWords.indexOf(w) === -1; });
+  }
+  const homeKeywords = getKeywords(homeNorm);
+  const awayKeywords = getKeywords(awayNorm);
 
-  // Look for "Prediction:" line with a score
-  const predictionMatch = aiText.match(/Prediction:\s*\\[^]?(\d+)\s*[-–]\s*(\d+)[^]?\\/i);
-  if (predictionMatch) {
-    const firstNum = parseInt(predictionMatch[1]);
-    const secondNum = parseInt(predictionMatch[2]);
-    // Find which team is mentioned immediately BEFORE the score
-    const beforeScoreText = aiText.substring(0, predictionMatch.index).toLowerCase();
-    const afterScoreText = aiText.substring(predictionMatch.index).toLowerCase();
+  // ---- STEP 1: Look for the "Prediction:" line - this is Bzzoiro's official prediction ----
+  const predMatch = text.match(/Prediction:\s*\n?\s*\\([^]+?)\\*/i);
+  if (predMatch) {
+    const predictionText = predMatch[1].toLowerCase();
     
-    // Check the last 200 characters before the prediction
-    const context = beforeScoreText.slice(-200) + afterScoreText.slice(0, 100);
-    const homePos = context.lastIndexOf(homeKey);
-    const awayPos = context.lastIndexOf(awayKey);
-    
-    if (homePos > awayPos && homePos !== -1) {
-      // Home team mentioned more recently - home team is FIRST (winner if firstNum > secondNum)
-      if (firstNum > secondNum) homeScore += 5;
-      else if (secondNum > firstNum) awayScore += 5;
-      else drawScore += 3;
-    } else if (awayPos > homePos && awayPos !== -1) {
-      // Away team mentioned more recently - away team is FIRST
-      if (firstNum > secondNum) awayScore += 5;
-      else if (secondNum > firstNum) homeScore += 5;
-      else drawScore += 3;
-    } else {
-      // Fallback: assume home team first
-      if (firstNum > secondNum) homeScore += 3;
-      else if (secondNum > firstNum) awayScore += 3;
-      else drawScore += 2;
+    // Check which team is mentioned in the prediction
+    const homeInPred = homeKeywords.some(function(k) { return predictionText.indexOf(k) !== -1; });
+    const awayInPred = awayKeywords.some(function(k) { return predictionText.indexOf(k) !== -1; });
+
+    // Extract score from prediction
+    const scoreMatch = predictionText.match(/(\d+)\s*[-–]\s*(\d+)/);
+    if (scoreMatch) {
+      const firstScore = parseInt(scoreMatch[1]);
+      const secondScore = parseInt(scoreMatch[2]);
+
+      // Which team is mentioned FIRST in the prediction?
+      let firstTeamPos = 999999;
+      let secondTeamPos = 999999;
+      let firstTeamIsHome = false;
+
+      homeKeywords.forEach(function(k) {
+        const pos = predictionText.indexOf(k);
+        if (pos !== -1 && pos < firstTeamPos) { firstTeamPos = pos; firstTeamIsHome = true; }
+      });
+      awayKeywords.forEach(function(k) {
+        const pos = predictionText.indexOf(k);
+        if (pos !== -1 && pos < firstTeamPos) { firstTeamPos = pos; firstTeamIsHome = false; }
+      });
+
+      // If no keyword found, fallback to checking which team name appears first
+      if (firstTeamPos === 999999) {
+        const homePos = predictionText.indexOf(homeNorm.split(' ')[0]);
+        const awayPos = predictionText.indexOf(awayNorm.split(' ')[0]);
+        if (homePos !== -1 && (awayPos === -1 || homePos < awayPos)) { firstTeamIsHome = true; }
+        else if (awayPos !== -1) { firstTeamIsHome = false; }
+        else { firstTeamIsHome = true; }
+      }
+
+      // Now assign scores correctly
+      let homeFinal, awayFinal;
+      if (firstTeamIsHome) {
+        homeFinal = firstScore;
+        awayFinal = secondScore;
+      } else {
+        // The first team in text is away
+        awayFinal = firstScore;
+        homeFinal = secondScore;
+      }
+
+      // Determine winner
+      if (homeFinal > awayFinal) return "HOME";
+      if (awayFinal > homeFinal) return "AWAY";
+      return "DRAW";
     }
+
+    // No score in prediction, but we know who they favor
+    if (homeInPred && !awayInPred) return "HOME";
+    if (awayInPred && !homeInPred) return "AWAY";
   }
 
-  // Generic draw indicators
-  if (text.indexOf('draw') !== -1 || text.indexOf('stalemate') !== -1) drawScore += 1;
+  // ---- STEP 2: Look for bold headlines with winner indication ----
+  // Example: "*CS Sfaxien rocks up as proper favorites here*"
+  // Example: "*AIK is rolling, Mjällby is in freefall*"
+  const boldMatches = text.match(/\\([^]+?)\\*/g);
+  if (boldMatches) {
+    let homeWins = 0, awayWins = 0;
+    boldMatches.forEach(function(bold) {
+      const bLower = bold.toLowerCase();
+      const homeInBold = homeKeywords.some(function(k) { return bLower.indexOf(k) !== -1; });
+      const awayInBold = awayKeywords.some(function(k) { return bLower.indexOf(k) !== -1; });
+      
+      // Look for winner keywords near the team
+      const winWords = ['rolling', 'favorites', 'favorit', 'dominat', 'wins', 'win', 'victor', 'edge', 'freefall', 'crisis', 'struggling', 'losing'];
+      
+      if (homeInBold) {
+        winWords.forEach(function(w) {
+          if (bLower.indexOf(w) !== -1) homeWins += 1;
+        });
+      }
+      if (awayInBold) {
+        winWords.forEach(function(w) {
+          if (bLower.indexOf(w) !== -1) awayWins += 1;
+        });
+      }
+    });
+    if (homeWins > awayWins && homeWins > 0) return "HOME";
+    if (awayWins > homeWins && awayWins > 0) return "AWAY";
+  }
 
-  // Decide
-  if (homeScore > awayScore && homeScore > drawScore) return "HOME";
-  if (awayScore > homeScore && awayScore > drawScore) return "AWAY";
-  if (drawScore > homeScore && drawScore > awayScore) return "DRAW";
+  // ---- STEP 3: Look for "X win Y", "X victory", "X have the edge" etc ----
+  let homeScore = 0, awayScore = 0;
+
+  // Common positive words for a team
+  const positiveWords = ['win', 'victory', 'triumph', 'dominant', 'favorites', 'edge', 'stronger', 'rolling', 'sharp', 'clinical', 'solid'];
+  const negativeWords = ['freefall', 'crisis', 'struggling', 'weak', 'poor', 'limping', 'losing', 'wobbling', 'concerns'];
+
+  homeKeywords.forEach(function(k) {
+    positiveWords.forEach(function(w) {
+      if (textLower.indexOf(k + ' ' + w) !== -1) homeScore += 2;
+      if (textLower.indexOf(k + "'s " + w) !== -1) homeScore += 2;
+    });
+    negativeWords.forEach(function(w) {
+      if (textLower.indexOf(k + ' ' + w) !== -1) awayScore += 1;
+      if (textLower.indexOf(k + ' is ' + w) !== -1) awayScore += 1;
+    });
+  });
+
+  awayKeywords.forEach(function(k) {
+    positiveWords.forEach(function(w) {
+      if (textLower.indexOf(k + ' ' + w) !== -1) awayScore += 2;
+      if (textLower.indexOf(k + "'s " + w) !== -1) awayScore += 2;
+    });
+    negativeWords.forEach(function(w) {
+      if (textLower.indexOf(k + ' ' + w) !== -1) homeScore += 1;
+      if (textLower.indexOf(k + ' is ' + w) !== -1) homeScore += 1;
+    });
+  });
+
+  if (homeScore > awayScore && homeScore >= 2) return "HOME";
+  if (awayScore > homeScore && awayScore >= 2) return "AWAY";
+
   return null;
 }
 
@@ -184,6 +261,7 @@ function analyzeMatch(match) {
 
   const totalXg = homeXg + awayXg;
 
+  // Base probabilities from formula
   const diff = homeXg - awayXg;
   let homeWinProb = Math.round(45 + (diff * 15));
   let awayWinProb = Math.round(30 - (diff * 15));
@@ -193,30 +271,29 @@ function analyzeMatch(match) {
   awayWinProb = Math.max(12, Math.min(70, awayWinProb));
   drawProb = Math.max(10, Math.min(40, drawProb));
 
+  // ---- AI OVERRIDE - THIS IS THE KEY FIX ----
   let aiPreview = "";
   if (match.ai_preview && match.ai_preview.text) {
     aiPreview = match.ai_preview.text;
   }
 
   let aiPredictedWinner = null;
+
   if (aiPreview) {
-    aiPredictedWinner = extractPredictedWinner(aiPreview, homeTeamName, awayTeamName);
+    aiPredictedWinner = parseAIPrediction(aiPreview, homeTeamName, awayTeamName);
 
     if (aiPredictedWinner === "HOME") {
-      homeWinProb = Math.max(55, homeWinProb);
-      awayWinProb = Math.min(awayWinProb, 20);
-      drawProb = 100 - homeWinProb - awayWinProb;
+      homeWinProb = 60;
+      drawProb = 22;
+      awayWinProb = 18;
     } else if (aiPredictedWinner === "AWAY") {
-      awayWinProb = Math.max(55, awayWinProb);
-      homeWinProb = Math.min(homeWinProb, 20);
-      drawProb = 100 - homeWinProb - awayWinProb;
+      awayWinProb = 60;
+      drawProb = 22;
+      homeWinProb = 18;
     } else if (aiPredictedWinner === "DRAW") {
-      drawProb = Math.max(32, drawProb);
-      homeWinProb = Math.min(homeWinProb, 36);
-      awayWinProb = Math.min(awayWinProb, 36);
-      const rem = 100 - drawProb;
-      homeWinProb = Math.round(rem / 2);
-      awayWinProb = 100 - drawProb - homeWinProb;
+      drawProb = 38;
+      homeWinProb = 31;
+      awayWinProb = 31;
     }
   }
 
@@ -247,7 +324,7 @@ function analyzeMatch(match) {
   if (status === 'finished') confidence += 40;
   if (status === 'live' || status === 'inprogress' || status === '2nd_half') confidence += 30;
   if (hasScore) confidence += 15;
-  if (aiPreview && aiPreview.length > 100) confidence += 20;
+  if (aiPredictedWinner) confidence += 25;
   confidence = Math.min(95, confidence);
 
   let matchResultPrediction = "DRAW";
