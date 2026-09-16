@@ -1,27 +1,4 @@
-[5:15 AM, 9/16/2026] CHIMEE: const express = require('express');
-const axios = require('axios');
-const path = require('path');
-const app = express();
-
-app.use(express.json());
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
-  next();
-});
-app.use(express.static(path.join(__dirname, 'public')));
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// Get realistic xG for a league based on name
-function leagueXg(leagueName) {
-  const name = (leagueName || "").toLowerCase();
-  if (name.includes("premier league")) return 3.0;
-  if (name.includes("la liga")) return 2.6;
-  if (name.includes("bundesliga")) return 3.2;
-  if (na…
-[5:26 AM, 9/16/2026] CHIMEE: const express = require('express');
+const express = require('express');
 const axios = require('axios');
 const path = require('path');
 const app = express();
