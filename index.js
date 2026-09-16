@@ -81,28 +81,20 @@ function analyzeMatch(match) {
   const baseXg = leagueXg(leagueName);
   const drawFactor = leagueDraw(leagueName);
 
-  // ---- DIFFERENTIATION ----
-  // Use team name hash + kickoff time to differentiate teams
   const homeHash = hashString(homeTeamName);
   const awayHash = hashString(awayTeamName);
-  
-  // Kickoff hour influences scoring (evening games = more goals historically)
+
   const kickoffStr = match.event_date || match.date || "";
   const kickoffHour = parseInt(kickoffStr.substring(11, 13)) || 20;
   const timeBonus = (kickoffHour >= 19 || kickoffHour <= 1) ? 0.15 : -0.05;
 
-  // Home team strength varies by hash (0.85 to 1.15 multiplier)
   const homeMult = 0.85 + ((homeHash % 30) / 100);
   const awayMult = 0.85 + ((awayHash % 30) / 100);
 
-  // Base xG
   let homeXg = baseXg * 0.55 * homeMult + timeBonus;
   let awayXg = baseXg * 0.45 * awayMult + timeBonus * 0.5;
-
-  // Home advantage
   homeXg *= 1.12;
 
-  // Use actual scores if available
   const hasScore = match.home_score !== null && match.home_score !== undefined && match.home_score !== "";
   const status = match.status || "unknown";
   const isPlayed = status === 'finished' || status === 'live' || status === 'inprogress' || status === '2nd_half' || status === '1st_half' || status === 'halftime';
@@ -114,7 +106,6 @@ function analyzeMatch(match) {
     awayXg = (awayXg * 0.25) + (actualA * 0.65) + 0.5;
   }
 
-  // Round number influences
   const roundNum = parseInt(match.round_number) || 1;
   const roundFactor = 0.85 + Math.min(0.15, roundNum * 0.02);
   homeXg *= roundFactor;
@@ -125,16 +116,11 @@ function analyzeMatch(match) {
 
   const totalXg = homeXg + awayXg;
 
-  // 1X2 Probabilities using logistic-like curve
-  const homeStrength = homeXg;
-  const awayStrength = awayXg;
-  const diff = homeStrength - awayStrength;
-
+  const diff = homeXg - awayXg;
   let homeWinProb = Math.round(45 + (diff * 15));
   let awayWinProb = Math.round(30 - (diff * 15));
   let drawProb = Math.round(drawFactor * 100);
 
-  // Normalize
   homeWinProb = Math.max(15, Math.min(75, homeWinProb));
   awayWinProb = Math.max(12, Math.min(70, awayWinProb));
   drawProb = Math.max(10, Math.min(40, drawProb));
@@ -143,7 +129,6 @@ function analyzeMatch(match) {
   awayWinProb = Math.round((awayWinProb / totalP) * 100);
   drawProb = 100 - homeWinProb - awayWinProb;
 
-  // Poisson for over/under
   function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
   function poissonUnder(k, lambda) {
     let sum = 0;
@@ -158,19 +143,16 @@ function analyzeMatch(match) {
   const under35 = Math.round(poissonUnder(3, totalXg));
   const under45 = Math.round(poissonUnder(4, totalXg));
 
-  // BTTS
   const homeScoresProb = 1 - Math.exp(-homeXg);
   const awayScoresProb = 1 - Math.exp(-awayXg);
   const bttsProb = Math.min(90, Math.max(25, Math.round(homeScoresProb * awayScoresProb * 100)));
 
-  // Confidence
   let confidence = 30;
   if (status === 'finished') confidence += 40;
   if (status === 'live' || status === 'inprogress' || status === '2nd_half') confidence += 30;
   if (hasScore) confidence += 15;
   confidence = Math.min(92, confidence);
 
-  // Predictions
   let matchResultPrediction = "DRAW";
   if (homeWinProb > awayWinProb && homeWinProb > drawProb) matchResultPrediction = "HOME WIN";
   else if (awayWinProb > homeWinProb && awayWinProb > drawProb) matchResultPrediction = "AWAY WIN";
@@ -182,7 +164,6 @@ function analyzeMatch(match) {
   if (dc1x >= dcx2 && dc1x >= dc12) doubleChancePrediction = "HOME OR DRAW (1X)";
   else if (dcx2 >= dc1x && dcx2 >= dc12) doubleChancePrediction = "AWAY OR DRAW (X2)";
 
-  // Safest bet
   let safestBet = "NO BET";
   let safestProb = 0;
   const candidates = [
@@ -240,14 +221,13 @@ app.get('/api/today', async (req, res) => {
   }
 });
 
-// SEARCH — Get all matches for a team (upcoming, live, finished)
+// SEARCH - Get all matches for a team
 app.get('/api/analyze', async (req, res) => {
   const teamName = req.query.teamName || 'Arsenal';
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
 
   try {
-    // Fetch with high limit to get as many matches as possible
     const listUrl = "https://sports.bzzoiro.com/api/events/?team_name=" + encodeURIComponent(teamName) + "&limit=50";
     const listResponse = await axios.get(listUrl, { headers: { Authorization: "Token " + API_KEY }, timeout: 12000 });
     let rawEvents = listResponse.data.results || [];
@@ -256,7 +236,6 @@ app.get('/api/analyze', async (req, res) => {
       return res.json({ status: "no_matches", message: "No matches found for " + teamName + ". Try another team name." });
     }
 
-    // Filter: Only keep matches where the searched team is actually playing
     const searchLower = teamName.toLowerCase().trim();
     rawEvents = rawEvents.filter(function(event) {
       let homeName = "";
@@ -274,7 +253,6 @@ app.get('/api/analyze', async (req, res) => {
 
     const analyzedMatches = rawEvents.map(analyzeMatch);
 
-    // Sort: live first, then upcoming, then finished
     analyzedMatches.sort(function(a, b) {
       const priority = { live: 0, inprogress: 0, "2nd_half": 0, "1st_half": 0, halftime: 0, upcoming: 1, notstarted: 1, scheduled: 1, finished: 2 };
       const aP = priority[a.match.matchStatus] !== undefined ? priority[a.match.matchStatus] : 1;
@@ -285,6 +263,33 @@ app.get('/api/analyze', async (req, res) => {
     res.json({ status: "success", count: analyzedMatches.length, searchTerm: teamName, matches: analyzedMatches });
   } catch (error) {
     res.status(500).json({ error: "Failed: " + error.message });
+  }
+});
+
+// DEBUG ENDPOINT - shows raw Bzzoiro data (we will remove this later)
+app.get('/api/debug', async (req, res) => {
+  const API_KEY = process.env.BZZOIRO_API_KEY;
+  const teamName = req.query.teamName || 'Arsenal';
+  if (!API_KEY) return res.status(500).json({ error: "No API key" });
+  try {
+    const url = "https://sports.bzzoiro.com/api/events/?team_name=" + encodeURIComponent(teamName) + "&limit=5";
+    const response = await axios.get(url, { headers: { Authorization: "Token " + API_KEY }, timeout: 10000 });
+    const data = response.data;
+    const results = data.results || [];
+    res.json({
+      debug: true,
+      searchTerm: teamName,
+      totalResults: results.length,
+      firstMatchStructure: results[0] || null,
+      teamNameFields: results[0] ? {
+        home_team: results[0].home_team,
+        away_team: results[0].away_team,
+        home_team_name: results[0].home_team_name,
+        away_team_name: results[0].away_team_name
+      } : null
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
