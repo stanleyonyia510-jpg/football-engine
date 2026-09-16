@@ -14,7 +14,6 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// League strength tiers
 function leagueXg(leagueName) {
   const name = (leagueName || "").toLowerCase();
   if (name.includes("premier league")) return 3.0;
@@ -31,15 +30,13 @@ function leagueXg(leagueName) {
   if (name.includes("argentina")) return 2.2;
   if (name.includes("colombia")) return 2.1;
   if (name.includes("chile")) return 2.3;
-  if (name.includes("peru")) return 2.1;
   if (name.includes("libertadores")) return 2.2;
   if (name.includes("sudamericana")) return 2.1;
   if (name.includes("championship")) return 2.6;
-  if (name.includes("j-league") || name.includes("japan")) return 2.7;
-  if (name.includes("k league") || name.includes("korea")) return 2.6;
-  if (name.includes("nigeria") || name.includes("egypt")) return 2.3;
+  if (name.includes("japan") || name.includes("korea")) return 2.7;
+  if (name.includes("nigeria") || name.includes("egypt") || name.includes("tunisia")) return 2.4;
+  if (name.includes("bulgaria") || name.includes("parva")) return 2.3;
   if (name.includes("girabola") || name.includes("angola")) return 2.2;
-  if (name.includes("australia")) return 2.8;
   if (name.includes("copa")) return 2.3;
   if (name.includes("cup")) return 2.7;
   return 2.5;
@@ -70,12 +67,66 @@ function hashString(str) {
   return Math.abs(hash);
 }
 
-// Extract readable names from team objects or strings
 function getTeamName(team) {
   if (!team) return "Unknown";
   if (typeof team === 'string') return team;
   if (team.name) return team.name;
   return "Unknown";
+}
+
+// Extract predicted score from AI preview text
+function extractPredictedScore(aiText) {
+  if (!aiText) return null;
+  // Look for patterns like "CSKA Sofia 2-1 Lokomotiv Sofia" or "2-0" or "3-2"
+  // Try multiple patterns
+  const patterns = [
+    /\\[^]+?\s(\d+)\s[-–]\s*(\d+)\s[^]+?\\/,  // **Team A 2-1 Team B*
+    /(\d+)\s*[-–]\s*(\d+)\s+(?:win|victory)/i,        // 2-1 win
+    /Prediction:\s*\\[^]+?(\d+)\s[-–]\s*(\d+)/i,  // Prediction: **... 2-1
+    /(\d+)\s*[-–]\s*(\d+)/                            // Any 2-1 pattern
+  ];
+  for (const pattern of patterns) {
+    const match = aiText.match(pattern);
+    if (match) {
+      const homeScore = parseInt(match[1]);
+      const awayScore = parseInt(match[2]);
+      if (homeScore >= 0 && homeScore <= 9 && awayScore >= 0 && awayScore <= 9) {
+        return { home: homeScore, away: awayScore };
+      }
+    }
+  }
+  return null;
+}
+
+// Extract predicted winner from AI text keywords
+function extractPredictedWinner(aiText, homeTeam, awayTeam) {
+  if (!aiText) return null;
+  const text = aiText.toLowerCase();
+  const homeLower = homeTeam.toLowerCase();
+  const awayLower = awayTeam.toLowerCase();
+
+  // Check for explicit team names near "win", "victory", "favorites", "edge"
+  const homeWinPatterns = [
+    new RegExp(homeLower + '[^.]{0,80}(win|victory|triumph|favorites|edge|dominat)', 'i'),
+    new RegExp('(win|victory|triumph|favorites|edge|dominat)[^.]{0,80}' + homeLower, 'i')
+  ];
+  const awayWinPatterns = [
+    new RegExp(awayLower + '[^.]{0,80}(win|victory|triumph|favorites|edge|dominat)', 'i'),
+    new RegExp('(win|victory|triumph|favorites|edge|dominat)[^.]{0,80}' + awayLower, 'i')
+  ];
+  const drawPatterns = [
+    /(draw|1-1|0-0|2-2|stalemate|share the points)/i
+  ];
+
+  let homeScore = 0, awayScore = 0, drawScore = 0;
+  homeWinPatterns.forEach(p => { if (p.test(text)) homeScore += 2; });
+  awayWinPatterns.forEach(p => { if (p.test(text)) awayScore += 2; });
+  drawPatterns.forEach(p => { if (p.test(text)) drawScore += 1; });
+
+  if (homeScore > awayScore && homeScore > drawScore) return "HOME";
+  if (awayScore > homeScore && awayScore > drawScore) return "AWAY";
+  if (drawScore > 0) return "DRAW";
+  return null;
 }
 
 function analyzeMatch(match) {
@@ -114,16 +165,12 @@ function analyzeMatch(match) {
     awayXg = (awayXg * 0.25) + (actualA * 0.65) + 0.5;
   }
 
-  const roundNum = parseInt(match.round_number) || 1;
-  const roundFactor = 0.85 + Math.min(0.15, roundNum * 0.02);
-  homeXg *= roundFactor;
-  awayXg *= roundFactor;
-
   homeXg = Math.max(0.5, Math.min(4.0, homeXg));
   awayXg = Math.max(0.4, Math.min(3.8, awayXg));
 
   const totalXg = homeXg + awayXg;
 
+  // ---- BASE PROBABILITIES (from formula) ----
   const diff = homeXg - awayXg;
   let homeWinProb = Math.round(45 + (diff * 15));
   let awayWinProb = Math.round(30 - (diff * 15));
@@ -132,6 +179,49 @@ function analyzeMatch(match) {
   homeWinProb = Math.max(15, Math.min(75, homeWinProb));
   awayWinProb = Math.max(12, Math.min(70, awayWinProb));
   drawProb = Math.max(10, Math.min(40, drawProb));
+
+  // ---- AI OVERRIDE ----
+  let aiPreview = "";
+  if (match.ai_preview && match.ai_preview.text) {
+    aiPreview = match.ai_preview.text;
+  }
+
+  let aiPredictedWinner = null;
+  let aiPredictedScore = null;
+
+  if (aiPreview) {
+    aiPredictedScore = extractPredictedScore(aiPreview);
+    aiPredictedWinner = extractPredictedWinner(aiPreview, homeTeamName, awayTeamName);
+
+    // If AI predicted a score, use it to set winner
+    if (aiPredictedScore) {
+      if (aiPredictedScore.home > aiPredictedScore.away) aiPredictedWinner = "HOME";
+      else if (aiPredictedScore.away > aiPredictedScore.home) aiPredictedWinner = "AWAY";
+      else aiPredictedWinner = "DRAW";
+    }
+
+    // Override our formula with the AI prediction
+    if (aiPredictedWinner === "HOME") {
+      homeWinProb = Math.max(52, homeWinProb);
+      homeWinProb = Math.min(homeWinProb, 75);
+      awayWinProb = Math.min(awayWinProb, 25);
+      drawProb = 100 - homeWinProb - awayWinProb;
+    } else if (aiPredictedWinner === "AWAY") {
+      awayWinProb = Math.max(52, awayWinProb);
+      awayWinProb = Math.min(awayWinProb, 75);
+      homeWinProb = Math.min(homeWinProb, 25);
+      drawProb = 100 - homeWinProb - awayWinProb;
+    } else if (aiPredictedWinner === "DRAW") {
+      drawProb = Math.max(30, drawProb);
+      homeWinProb = Math.min(homeWinProb, 40);
+      awayWinProb = Math.min(awayWinProb, 40);
+      const rem = 100 - drawProb;
+      homeWinProb = Math.round(rem / 2);
+      awayWinProb = 100 - drawProb - homeWinProb;
+    }
+  }
+
+  // Normalize
   const totalP = homeWinProb + awayWinProb + drawProb;
   homeWinProb = Math.round((homeWinProb / totalP) * 100);
   awayWinProb = Math.round((awayWinProb / totalP) * 100);
@@ -159,8 +249,10 @@ function analyzeMatch(match) {
   if (status === 'finished') confidence += 40;
   if (status === 'live' || status === 'inprogress' || status === '2nd_half') confidence += 30;
   if (hasScore) confidence += 15;
-  confidence = Math.min(92, confidence);
+  if (aiPreview && aiPreview.length > 100) confidence += 15;
+  confidence = Math.min(95, confidence);
 
+  // Predictions
   let matchResultPrediction = "DRAW";
   if (homeWinProb > awayWinProb && homeWinProb > drawProb) matchResultPrediction = "HOME WIN";
   else if (awayWinProb > homeWinProb && awayWinProb > drawProb) matchResultPrediction = "AWAY WIN";
@@ -191,16 +283,8 @@ function analyzeMatch(match) {
   if (safestProb > 60 && confidence > 50) verdict = "🟡 WAIT FOR MORE INFORMATION";
   if (safestProb > 72 && confidence > 65) verdict = "🟢 BET";
 
-  // Get Bzzoiro AI preview text if available
-  let aiPreview = "";
-  if (match.ai_preview && match.ai_preview.text) {
-    aiPreview = match.ai_preview.text;
-  }
-
-  // Get venue and referee
   let venue = "";
   if (match.venue && match.venue.name) venue = match.venue.name;
-  
   let referee = "";
   if (match.referee && match.referee.name) referee = match.referee.name;
 
@@ -215,6 +299,8 @@ function analyzeMatch(match) {
       referee: referee
     },
     aiPreview: aiPreview,
+    aiPredictedWinner: aiPredictedWinner,
+    aiPredictedScore: aiPredictedScore,
     probabilities: { homeWin: homeWinProb, draw: drawProb, awayWin: awayWinProb },
     expectedGoals: { home: homeXg.toFixed(2), away: awayXg.toFixed(2), total: totalXg.toFixed(2) },
     predictions: { matchResult: matchResultPrediction, doubleChance: doubleChancePrediction },
@@ -229,7 +315,6 @@ function analyzeMatch(match) {
   };
 }
 
-// TODAY & UPCOMING
 app.get('/api/today', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
@@ -245,12 +330,10 @@ app.get('/api/today', async (req, res) => {
   }
 });
 
-// SEARCH - Returns whatever Bzzoiro has (no more broken filtering)
 app.get('/api/analyze', async (req, res) => {
   const teamName = req.query.teamName || '';
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
-
   try {
     let listUrl;
     if (teamName && teamName.trim() !== '') {
@@ -258,23 +341,16 @@ app.get('/api/analyze', async (req, res) => {
     } else {
       listUrl = "https://sports.bzzoiro.com/api/events/?limit=20";
     }
-    
     const listResponse = await axios.get(listUrl, { headers: { Authorization: "Token " + API_KEY }, timeout: 12000 });
     const rawEvents = listResponse.data.results || [];
-
-    if (rawEvents.length === 0) {
-      return res.json({ status: "no_matches", message: "No matches found. Try another search." });
-    }
-
+    if (rawEvents.length === 0) return res.json({ status: "no_matches", message: "No matches found. Try another search." });
     const analyzedMatches = rawEvents.map(analyzeMatch);
-
     analyzedMatches.sort(function(a, b) {
       const priority = { live: 0, inprogress: 0, "2nd_half": 0, "1st_half": 0, halftime: 0, upcoming: 1, notstarted: 1, scheduled: 1, finished: 2 };
       const aP = priority[a.match.matchStatus] !== undefined ? priority[a.match.matchStatus] : 1;
       const bP = priority[b.match.matchStatus] !== undefined ? priority[b.match.matchStatus] : 1;
       return aP - bP;
     });
-
     res.json({ status: "success", count: analyzedMatches.length, searchTerm: teamName, matches: analyzedMatches });
   } catch (error) {
     res.status(500).json({ error: "Failed: " + error.message });
