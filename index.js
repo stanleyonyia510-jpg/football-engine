@@ -14,34 +14,6 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-function leagueXg(leagueName) {
-  const name = (leagueName || "").toLowerCase();
-  if (name.includes("premier league")) return 3.0;
-  if (name.includes("la liga")) return 2.6;
-  if (name.includes("bundesliga")) return 3.2;
-  if (name.includes("serie a")) return 2.7;
-  if (name.includes("ligue 1")) return 2.7;
-  if (name.includes("champions league")) return 3.0;
-  if (name.includes("europa")) return 2.9;
-  if (name.includes("conference")) return 2.9;
-  if (name.includes("mls")) return 3.2;
-  if (name.includes("liga mx")) return 3.0;
-  if (name.includes("brasileir")) return 2.4;
-  if (name.includes("argentina")) return 2.2;
-  if (name.includes("colombia")) return 2.1;
-  if (name.includes("chile")) return 2.3;
-  if (name.includes("libertadores")) return 2.2;
-  if (name.includes("sudamericana")) return 2.1;
-  if (name.includes("championship")) return 2.6;
-  if (name.includes("japan") || name.includes("korea")) return 2.7;
-  if (name.includes("nigeria") || name.includes("egypt") || name.includes("tunisia")) return 2.4;
-  if (name.includes("bulgaria")) return 2.3;
-  if (name.includes("girabola") || name.includes("angola")) return 2.2;
-  if (name.includes("copa")) return 2.3;
-  if (name.includes("cup")) return 2.7;
-  return 2.5;
-}
-
 function leagueDraw(leagueName) {
   const name = (leagueName || "").toLowerCase();
   if (name.includes("ligue 1")) return 0.30;
@@ -93,7 +65,6 @@ function distinctiveKeyword(name) {
   return core || normalizeName(name);
 }
 
-// ============ EXTRACT AI PREDICTION ============
 function extractPredictionLine(aiText) {
   if (!aiText) return null;
   const patterns = [
@@ -202,20 +173,17 @@ function parseAIPrediction(aiText, homeTeam, awayTeam) {
   };
 }
 
-// ============ CALCULATE PROBABILITIES FROM PREDICTED SCORELINE ============
-// Different scorelines = different probability distributions
+// ============ PROBABILITIES FROM SCORELINE ============
 function probabilitiesFromScoreline(homeScore, awayScore, leagueName) {
   const totalGoals = homeScore + awayScore;
   const goalDiff = homeScore - awayScore;
 
-  // Base probabilities depend on goal difference
   let homeWin, draw, awayWin;
 
   if (goalDiff >= 3) { homeWin = 78; draw = 12; awayWin = 10; }
   else if (goalDiff === 2) { homeWin = 68; draw = 18; awayWin = 14; }
   else if (goalDiff === 1) { homeWin = 55; draw = 24; awayWin = 21; }
-  else if (goalDiff === 0) { 
-    // Draw predicted
+  else if (goalDiff === 0) {
     if (totalGoals <= 1) { homeWin = 22; draw = 56; awayWin = 22; }
     else if (totalGoals <= 3) { homeWin = 28; draw = 44; awayWin = 28; }
     else { homeWin = 32; draw = 36; awayWin = 32; }
@@ -224,7 +192,6 @@ function probabilitiesFromScoreline(homeScore, awayScore, leagueName) {
   else if (goalDiff === -2) { homeWin = 14; draw = 18; awayWin = 68; }
   else { homeWin = 10; draw = 12; awayWin = 78; }
 
-  // Add small variation based on league
   const leagueDrawRate = leagueDraw(leagueName);
   const drawAdjust = (leagueDrawRate - 0.27) * 20;
   draw = Math.max(10, Math.min(50, draw + drawAdjust));
@@ -236,6 +203,54 @@ function probabilitiesFromScoreline(homeScore, awayScore, leagueName) {
   return { homeWin: homeWin, draw: draw, awayWin: awayWin };
 }
 
+// ============ GOALS MARKETS FROM SCORELINE ============
+function goalsFromScoreline(homeScore, awayScore) {
+  const totalGoals = homeScore + awayScore;
+  const homeScored = homeScore > 0;
+  const awayScored = awayScore > 0;
+
+  // Over/Under markets — exact based on total goals
+  let over15, over25, over35, over45;
+  if (totalGoals === 0) { over15 = 5; over25 = 2; over35 = 1; over45 = 0; }
+  else if (totalGoals === 1) { over15 = 55; over25 = 18; over35 = 6; over45 = 2; }
+  else if (totalGoals === 2) { over15 = 90; over25 = 45; over35 = 18; over45 = 6; }
+  else if (totalGoals === 3) { over15 = 96; over25 = 78; over35 = 40; over45 = 15; }
+  else if (totalGoals === 4) { over15 = 98; over25 = 90; over35 = 65; over45 = 32; }
+  else if (totalGoals === 5) { over15 = 99; over25 = 95; over35 = 82; over45 = 55; }
+  else { over15 = 99; over25 = 97; over35 = 90; over45 = 75; }
+
+  // BTTS — based on whether both scored
+  let bttsProb;
+  if (homeScored && awayScored) {
+    bttsProb = totalGoals >= 4 ? 90 : (totalGoals === 3 ? 82 : 70);
+  } else if (homeScored && !awayScored) {
+    bttsProb = 22;
+  } else if (!homeScored && awayScored) {
+    bttsProb = 20;
+  } else {
+    bttsProb = 8;
+  }
+
+  return {
+    over15: over15, under15: 100 - over15,
+    over25: over25, under25: 100 - over25,
+    over35: over35, under35: 100 - over35,
+    over45: over45, under45: 100 - over45,
+    bttsYes: bttsProb, bttsNo: 100 - bttsProb
+  };
+}
+
+// ============ FALLBACK FOR NO AI PREDICTION ============
+function fallbackGoals() {
+  return {
+    over15: 68, under15: 32,
+    over25: 45, under25: 55,
+    over35: 22, under35: 78,
+    over45: 8, under45: 92,
+    bttsYes: 48, bttsNo: 52
+  };
+}
+
 function analyzeMatch(match) {
   const homeTeamName = getTeamName(match.home_team);
   const awayTeamName = getTeamName(match.away_team);
@@ -243,26 +258,6 @@ function analyzeMatch(match) {
   let leagueName = "Unknown Competition";
   if (match.league && match.league.name) leagueName = match.league.name;
   else if (match.league_name) leagueName = match.league_name;
-
-  const baseXg = leagueXg(leagueName);
-  let homeXg = baseXg * 0.55 * 1.12;
-  let awayXg = baseXg * 0.45;
-
-  const hasScore = match.home_score !== null && match.home_score !== undefined && match.home_score !== "";
-  const status = match.status || "unknown";
-  const isPlayed = status === 'finished' || status === 'live' || status === 'inprogress' ||
-                   status === '2nd_half' || status === '1st_half' || status === 'halftime';
-
-  if (hasScore && isPlayed) {
-    const actualH = parseInt(match.home_score) || 0;
-    const actualA = parseInt(match.away_score) || 0;
-    homeXg = (homeXg * 0.3) + (actualH * 0.7);
-    awayXg = (awayXg * 0.3) + (actualA * 0.7);
-  }
-
-  homeXg = Math.max(0.5, Math.min(4.0, homeXg));
-  awayXg = Math.max(0.4, Math.min(3.8, awayXg));
-  const totalXg = homeXg + awayXg;
 
   let aiPreview = "";
   if (match.ai_preview && match.ai_preview.text) aiPreview = match.ai_preview.text;
@@ -274,37 +269,24 @@ function analyzeMatch(match) {
 
   // ---- PROBABILITIES ----
   let homeWinProb, drawProb, awayWinProb;
-
   if (aiPrediction) {
-    // Use scoreline-derived probabilities — each scoreline gives different numbers
     const probs = probabilitiesFromScoreline(aiPrediction.predictedHomeScore, aiPrediction.predictedAwayScore, leagueName);
     homeWinProb = probs.homeWin;
     drawProb = probs.draw;
     awayWinProb = probs.awayWin;
   } else {
-    // Fallback: model estimate
-    const diff = homeXg - awayXg;
-    homeWinProb = Math.max(20, Math.min(60, Math.round(40 + (diff * 10))));
-    awayWinProb = Math.max(20, Math.min(60, Math.round(35 - (diff * 10))));
-    drawProb = 100 - homeWinProb - awayWinProb;
-    if (drawProb < 15) { drawProb = 15; homeWinProb = Math.round((100 - 15) * homeWinProb / (homeWinProb + awayWinProb)); awayWinProb = 100 - 15 - homeWinProb; }
+    homeWinProb = 40;
+    drawProb = 28;
+    awayWinProb = 32;
   }
 
-  // Goals markets
-  function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
-  function poissonUnder(k, lambda) {
-    let sum = 0;
-    for (let i = 0; i <= k; i++) sum += Math.exp(-lambda) * Math.pow(lambda, i) / factorial(i);
-    return Math.min(99, Math.max(1, sum * 100));
+  // ---- GOALS & BTTS ----
+  let markets;
+  if (aiPrediction) {
+    markets = goalsFromScoreline(aiPrediction.predictedHomeScore, aiPrediction.predictedAwayScore);
+  } else {
+    markets = fallbackGoals();
   }
-  const under15 = Math.round(poissonUnder(1, totalXg));
-  const under25 = Math.round(poissonUnder(2, totalXg));
-  const under35 = Math.round(poissonUnder(3, totalXg));
-  const under45 = Math.round(poissonUnder(4, totalXg));
-
-  const homeScoresProb = 1 - Math.exp(-homeXg);
-  const awayScoresProb = 1 - Math.exp(-awayXg);
-  const bttsProb = Math.min(90, Math.max(25, Math.round(homeScoresProb * awayScoresProb * 100)));
 
   // ---- PREDICTIONS ----
   let matchResultPrediction = "NO CLEAR AI PREDICTION";
@@ -334,10 +316,11 @@ function analyzeMatch(match) {
   }
 
   // ---- CONFIDENCE ----
-  // Real confidence based on real data — not inflated
   let confidence = 40;
-  if (aiPrediction) confidence += 20; // AI prediction present = moderate boost
-  if (hasScore && isPlayed) confidence += 15;
+  if (aiPrediction) confidence += 20;
+  const status = match.status || "unknown";
+  const hasScore = match.home_score !== null && match.home_score !== undefined && match.home_score !== "";
+  if (hasScore) confidence += 10;
   if (status === 'finished') confidence += 10;
   confidence = Math.min(85, confidence);
 
@@ -346,7 +329,6 @@ function analyzeMatch(match) {
   if (confidence >= 70) confidenceLabel = "HIGH";
 
   // ---- VERDICT ----
-  // More generous so matches aren't all "NO BET"
   let verdict = "🔴 NO BET";
   if (aiPrediction && confidence >= 50) verdict = "🟡 WAIT FOR MORE INFORMATION";
   if (aiPrediction && confidence >= 60 && safestProb >= 50) verdict = "🟢 BET";
@@ -377,22 +359,10 @@ function analyzeMatch(match) {
     aiPreview: aiPreview,
     aiPrediction: aiPredictionOutput,
     probabilities: { homeWin: homeWinProb, draw: drawProb, awayWin: awayWinProb },
-    expectedGoals: {
-      home: homeXg.toFixed(2),
-      away: awayXg.toFixed(2),
-      total: totalXg.toFixed(2),
-      label: "MODEL ESTIMATE"
-    },
+    markets: markets,
     predictions: {
       matchResult: matchResultPrediction,
       doubleChance: doubleChancePrediction
-    },
-    markets: {
-      over15: 100 - under15, under15: under15,
-      over25: 100 - under25, under25: under25,
-      over35: 100 - under35, under35: under35,
-      over45: 100 - under45, under45: under45,
-      bttsYes: bttsProb, bttsNo: 100 - bttsProb
     },
     analysis: {
       confidence: confidence,
@@ -404,7 +374,6 @@ function analyzeMatch(match) {
   };
 }
 
-// ============ ENDPOINTS ============
 app.get('/api/today', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
