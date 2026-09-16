@@ -79,7 +79,6 @@ function normalize(name) {
   return (name || "").toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
 }
 
-// ROBUST AI PARSER — finds the winner from Bzzoiro's own text
 function parseAIPrediction(aiText, homeTeam, awayTeam) {
   if (!aiText) return null;
 
@@ -88,7 +87,6 @@ function parseAIPrediction(aiText, homeTeam, awayTeam) {
   const homeNorm = normalize(homeTeam);
   const awayNorm = normalize(awayTeam);
 
-  // Get distinctive keywords from team names (skip common words)
   const stopWords = ['fc', 'sc', 'cf', 'ac', 'afc', 'the', 'and', 'city', 'club', 'united'];
   function getKeywords(name) {
     return name.split(/\s+/).filter(function(w) { return w.length > 3 && stopWords.indexOf(w) === -1; });
@@ -96,25 +94,20 @@ function parseAIPrediction(aiText, homeTeam, awayTeam) {
   const homeKeywords = getKeywords(homeNorm);
   const awayKeywords = getKeywords(awayNorm);
 
-  // ---- STEP 1: Look for the "Prediction:" line - this is Bzzoiro's official prediction ----
+  // STEP 1: Look for the "Prediction:" line
   const predMatch = text.match(/Prediction:\s*\n?\s*\\([^]+?)\\*/i);
   if (predMatch) {
     const predictionText = predMatch[1].toLowerCase();
-    
-    // Check which team is mentioned in the prediction
     const homeInPred = homeKeywords.some(function(k) { return predictionText.indexOf(k) !== -1; });
     const awayInPred = awayKeywords.some(function(k) { return predictionText.indexOf(k) !== -1; });
 
-    // Extract score from prediction
     const scoreMatch = predictionText.match(/(\d+)\s*[-–]\s*(\d+)/);
     if (scoreMatch) {
       const firstScore = parseInt(scoreMatch[1]);
       const secondScore = parseInt(scoreMatch[2]);
 
-      // Which team is mentioned FIRST in the prediction?
+      let firstTeamIsHome = true;
       let firstTeamPos = 999999;
-      let secondTeamPos = 999999;
-      let firstTeamIsHome = false;
 
       homeKeywords.forEach(function(k) {
         const pos = predictionText.indexOf(k);
@@ -125,40 +118,32 @@ function parseAIPrediction(aiText, homeTeam, awayTeam) {
         if (pos !== -1 && pos < firstTeamPos) { firstTeamPos = pos; firstTeamIsHome = false; }
       });
 
-      // If no keyword found, fallback to checking which team name appears first
       if (firstTeamPos === 999999) {
         const homePos = predictionText.indexOf(homeNorm.split(' ')[0]);
         const awayPos = predictionText.indexOf(awayNorm.split(' ')[0]);
-        if (homePos !== -1 && (awayPos === -1 || homePos < awayPos)) { firstTeamIsHome = true; }
-        else if (awayPos !== -1) { firstTeamIsHome = false; }
-        else { firstTeamIsHome = true; }
+        if (homePos !== -1 && (awayPos === -1 || homePos < awayPos)) firstTeamIsHome = true;
+        else if (awayPos !== -1) firstTeamIsHome = false;
       }
 
-      // Now assign scores correctly
       let homeFinal, awayFinal;
       if (firstTeamIsHome) {
         homeFinal = firstScore;
         awayFinal = secondScore;
       } else {
-        // The first team in text is away
         awayFinal = firstScore;
         homeFinal = secondScore;
       }
 
-      // Determine winner
       if (homeFinal > awayFinal) return "HOME";
       if (awayFinal > homeFinal) return "AWAY";
       return "DRAW";
     }
 
-    // No score in prediction, but we know who they favor
     if (homeInPred && !awayInPred) return "HOME";
     if (awayInPred && !homeInPred) return "AWAY";
   }
 
-  // ---- STEP 2: Look for bold headlines with winner indication ----
-  // Example: "*CS Sfaxien rocks up as proper favorites here*"
-  // Example: "*AIK is rolling, Mjällby is in freefall*"
+  // STEP 2: Bold headlines
   const boldMatches = text.match(/\\([^]+?)\\*/g);
   if (boldMatches) {
     let homeWins = 0, awayWins = 0;
@@ -166,29 +151,20 @@ function parseAIPrediction(aiText, homeTeam, awayTeam) {
       const bLower = bold.toLowerCase();
       const homeInBold = homeKeywords.some(function(k) { return bLower.indexOf(k) !== -1; });
       const awayInBold = awayKeywords.some(function(k) { return bLower.indexOf(k) !== -1; });
-      
-      // Look for winner keywords near the team
       const winWords = ['rolling', 'favorites', 'favorit', 'dominat', 'wins', 'win', 'victor', 'edge', 'freefall', 'crisis', 'struggling', 'losing'];
-      
       if (homeInBold) {
-        winWords.forEach(function(w) {
-          if (bLower.indexOf(w) !== -1) homeWins += 1;
-        });
+        winWords.forEach(function(w) { if (bLower.indexOf(w) !== -1) homeWins += 1; });
       }
       if (awayInBold) {
-        winWords.forEach(function(w) {
-          if (bLower.indexOf(w) !== -1) awayWins += 1;
-        });
+        winWords.forEach(function(w) { if (bLower.indexOf(w) !== -1) awayWins += 1; });
       }
     });
     if (homeWins > awayWins && homeWins > 0) return "HOME";
     if (awayWins > homeWins && awayWins > 0) return "AWAY";
   }
 
-  // ---- STEP 3: Look for "X win Y", "X victory", "X have the edge" etc ----
+  // STEP 3: Proximity search
   let homeScore = 0, awayScore = 0;
-
-  // Common positive words for a team
   const positiveWords = ['win', 'victory', 'triumph', 'dominant', 'favorites', 'edge', 'stronger', 'rolling', 'sharp', 'clinical', 'solid'];
   const negativeWords = ['freefall', 'crisis', 'struggling', 'weak', 'poor', 'limping', 'losing', 'wobbling', 'concerns'];
 
@@ -261,7 +237,6 @@ function analyzeMatch(match) {
 
   const totalXg = homeXg + awayXg;
 
-  // Base probabilities from formula
   const diff = homeXg - awayXg;
   let homeWinProb = Math.round(45 + (diff * 15));
   let awayWinProb = Math.round(30 - (diff * 15));
@@ -271,7 +246,6 @@ function analyzeMatch(match) {
   awayWinProb = Math.max(12, Math.min(70, awayWinProb));
   drawProb = Math.max(10, Math.min(40, drawProb));
 
-  // ---- AI OVERRIDE - THIS IS THE KEY FIX ----
   let aiPreview = "";
   if (match.ai_preview && match.ai_preview.text) {
     aiPreview = match.ai_preview.text;
@@ -389,12 +363,13 @@ function analyzeMatch(match) {
   };
 }
 
+// TODAY ENDPOINT — now fetches up to 50 matches
 app.get('/api/today', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
   try {
-    const listUrl = "https://sports.bzzoiro.com/api/events/?limit=20";
-    const listResponse = await axios.get(listUrl, { headers: { Authorization: "Token " + API_KEY }, timeout: 10000 });
+    const listUrl = "https://sports.bzzoiro.com/api/events/?limit=50";
+    const listResponse = await axios.get(listUrl, { headers: { Authorization: "Token " + API_KEY }, timeout: 15000 });
     const rawEvents = listResponse.data.results || [];
     if (rawEvents.length === 0) return res.json({ status: "no_matches", message: "No matches found." });
     const analyzedMatches = rawEvents.map(analyzeMatch);
@@ -411,11 +386,11 @@ app.get('/api/analyze', async (req, res) => {
   try {
     let listUrl;
     if (teamName && teamName.trim() !== '') {
-      listUrl = "https://sports.bzzoiro.com/api/events/?team_name=" + encodeURIComponent(teamName) + "&limit=20";
+      listUrl = "https://sports.bzzoiro.com/api/events/?team_name=" + encodeURIComponent(teamName) + "&limit=50";
     } else {
-      listUrl = "https://sports.bzzoiro.com/api/events/?limit=20";
+      listUrl = "https://sports.bzzoiro.com/api/events/?limit=50";
     }
-    const listResponse = await axios.get(listUrl, { headers: { Authorization: "Token " + API_KEY }, timeout: 12000 });
+    const listResponse = await axios.get(listUrl, { headers: { Authorization: "Token " + API_KEY }, timeout: 15000 });
     const rawEvents = listResponse.data.results || [];
     if (rawEvents.length === 0) return res.json({ status: "no_matches", message: "No matches found. Try another search." });
     const analyzedMatches = rawEvents.map(analyzeMatch);
