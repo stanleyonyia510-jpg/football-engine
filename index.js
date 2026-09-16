@@ -14,41 +14,47 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// League strength tiers (based on real league ID from Bzzoiro)
-// Higher = more goals, more predictable outcomes
+// League strength tiers (based on real league name)
 function leagueStrength(leagueId, leagueName) {
   const name = (leagueName || "").toLowerCase();
   
-  // Top European leagues (highest scoring, most predictable)
+  // Top European leagues
   if (name.includes("premier league") || name.includes("la liga") || name.includes("serie a") || name.includes("bundesliga") || name.includes("ligue 1")) {
-    return { xgBase: 2.8, predictability: 0.75, drawFactor: 0.22 };
+    return { xgBase: 2.9, drawFactor: 0.22 };
   }
-  // Second tier European (Championship, Serie B, etc.)
+  // Second tier European
   if (name.includes("championship") || name.includes("serie b") || name.includes("segunda") || name.includes("bundesliga 2")) {
-    return { xgBase: 2.5, predictability: 0.65, drawFactor: 0.28 };
+    return { xgBase: 2.5, drawFactor: 0.28 };
   }
-  // European cups (higher scoring, less predictable)
+  // European cups
   if (name.includes("champions league") || name.includes("europa") || name.includes("conference")) {
-    return { xgBase: 2.9, predictability: 0.55, drawFactor: 0.25 };
+    return { xgBase: 3.0, drawFactor: 0.25 };
   }
-  // South American leagues (lower scoring, more draws)
+  // South American leagues
   if (name.includes("brasileir") || name.includes("argentina") || name.includes("colombia") || name.includes("chile") || name.includes("peru") || name.includes("uruguay") || name.includes("ecuador")) {
-    return { xgBase: 2.2, predictability: 0.55, drawFactor: 0.33 };
+    return { xgBase: 2.3, drawFactor: 0.33 };
   }
-  // Copa Libertadores / Sudamericana (defensive, cagey)
+  // Copa Libertadores / Sudamericana (defensive)
   if (name.includes("libertadores") || name.includes("sudamericana")) {
-    return { xgBase: 2.1, predictability: 0.50, drawFactor: 0.35 };
+    return { xgBase: 2.2, drawFactor: 0.35 };
   }
-  // African/Asian leagues (variable)
-  if (name.includes("nigeria") || name.includes("egypt") || name.includes("south africa") || name.includes("japan") || name.includes("korea")) {
-    return { xgBase: 2.3, predictability: 0.55, drawFactor: 0.30 };
+  // North American (MLS - HIGH SCORING)
+  if (name.includes("mls") || name.includes("major league soccer") || name.includes("usl") || name.includes("liga mx")) {
+    return { xgBase: 3.1, drawFactor: 0.20 };
+  }
+  // Asian leagues
+  if (name.includes("japan") || name.includes("j-league") || name.includes("korea") || name.includes("chinese")) {
+    return { xgBase: 2.6, drawFactor: 0.28 };
+  }
+  // African leagues
+  if (name.includes("nigeria") || name.includes("egypt") || name.includes("south africa") || name.includes("morocco")) {
+    return { xgBase: 2.4, drawFactor: 0.30 };
   }
   // Default
-  return { xgBase: 2.5, predictability: 0.60, drawFactor: 0.28 };
+  return { xgBase: 2.6, drawFactor: 0.27 };
 }
 
-// Analyze a single match using REAL data from Bzzoiro
-function analyzeMatch(match, allMatchesInLeague) {
+function analyzeMatch(match) {
   const homeTeamName = (match.home_team && match.home_team.name) ? match.home_team.name : (match.home_team || "Home Team");
   const awayTeamName = (match.away_team && match.away_team.name) ? match.away_team.name : (match.away_team || "Away Team");
 
@@ -59,89 +65,85 @@ function analyzeMatch(match, allMatchesInLeague) {
 
   const strength = leagueStrength(leagueId, leagueName);
 
-  // ---- REAL DATA DRIVEN CALCULATIONS ----
-
   // Base xG from league strength
   let homeXg = strength.xgBase * 0.55;
   let awayXg = strength.xgBase * 0.45;
 
-  // Home advantage (real: home teams score ~15% more)
+  // Home advantage
   homeXg *= 1.15;
 
-  // If match is finished or live, use REAL SCORES to influence xG
+  // Use actual score if available
   let actualHomeScore = null, actualAwayScore = null;
   if (match.home_score !== null && match.home_score !== undefined && match.home_score !== "") {
     actualHomeScore = parseInt(match.home_score) || 0;
     actualAwayScore = parseInt(match.away_score) || 0;
-    // Actual scores heavily influence xG for finished matches
-    homeXg = (homeXg * 0.3) + (actualHomeScore * 0.7) + 0.3;
-    awayXg = (awayXg * 0.3) + (actualAwayScore * 0.7) + 0.3;
+    if (match.status === 'finished' || match.status === 'live' || match.status === 'inprogress' || match.status === '2nd_half') {
+      homeXg = (homeXg * 0.3) + (actualHomeScore * 0.7) + 0.3;
+      awayXg = (awayXg * 0.3) + (actualAwayScore * 0.7) + 0.3;
+    }
   }
 
-  // Use round number to vary: later rounds = more settled form
+  // Round number influence
   const roundNum = parseInt(match.round_number) || 1;
   const roundFactor = Math.min(1.0, 0.85 + (roundNum * 0.02));
   homeXg *= roundFactor;
   awayXg *= roundFactor;
 
-  // Clamp to realistic values
   homeXg = Math.max(0.6, Math.min(3.5, homeXg));
   awayXg = Math.max(0.5, Math.min(3.2, awayXg));
 
   const totalXg = homeXg + awayXg;
 
-  // Calculate 1X2 probabilities using real xG distribution
-  // (Realistic: draws are common in low-scoring games, rare in high-scoring)
-  const homeStrength = homeXg;
-  const awayStrength = awayXg;
+  // 1X2 Probabilities
+  let homeWinProb = Math.round((homeXg / totalXg) * 100 * (1 - strength.drawFactor * 0.6));
+  let awayWinProb = Math.round((awayXg / totalXg) * 100 * (1 - strength.drawFactor * 0.6));
 
-  let homeWinProb = Math.round((homeStrength / (homeStrength + awayStrength)) * 100 * (1 - strength.drawFactor * 0.6));
-  let awayWinProb = Math.round((awayStrength / (homeStrength + awayStrength)) * 100 * (1 - strength.drawFactor * 0.6));
-
-  // Realistic draw probability based on how evenly matched teams are
   const matchCloseness = 1 - Math.abs(homeWinProb - awayWinProb) / 100;
   let drawProb = Math.round(strength.drawFactor * 100 * matchCloseness + 8);
 
-  // Normalize
-  const total = homeWinProb + awayWinProb + drawProb;
-  homeWinProb = Math.round((homeWinProb / total) * 100);
-  awayWinProb = Math.round((awayWinProb / total) * 100);
+  const totalProb = homeWinProb + awayWinProb + drawProb;
+  homeWinProb = Math.round((homeWinProb / totalProb) * 100);
+  awayWinProb = Math.round((awayWinProb / totalProb) * 100);
   drawProb = 100 - homeWinProb - awayWinProb;
 
-  // GOALS MARKETS - Calculated from real xG using Poisson distribution
-  function poissonOver(k, lambda) {
+  // Poisson for goals markets
+  function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
+  function poissonUnder(k, lambda) {
     let sum = 0;
     for (let i = 0; i <= k; i++) {
       sum += Math.exp(-lambda) * Math.pow(lambda, i) / factorial(i);
     }
-    return (1 - sum) * 100;
+    return sum * 100;
   }
-  function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
 
-  const over15Prob = Math.round(poissonOver(1, totalXg));
-  const over25Prob = Math.round(poissonOver(2, totalXg));
-  const over35Prob = Math.round(poissonOver(3, totalXg));
-  const over45Prob = Math.round(poissonOver(4, totalXg));
+  const under15 = Math.round(poissonUnder(1, totalXg));
+  const under25 = Math.round(poissonUnder(2, totalXg));
+  const under35 = Math.round(poissonUnder(3, totalXg));
+  const under45 = Math.round(poissonUnder(4, totalXg));
+  const over15 = 100 - under15;
+  const over25 = 100 - under25;
+  const over35 = 100 - under35;
+  const over45 = 100 - under45;
 
-  // BTTS from Poisson: P(home scores ≥1) * P(away scores ≥1)
+  // BTTS from Poisson
   const homeScoresProb = (1 - Math.exp(-homeXg));
   const awayScoresProb = (1 - Math.exp(-awayXg));
   const bttsProb = Math.round(homeScoresProb * awayScoresProb * 100);
 
-  // CONFIDENCE - based on data quality
+  // Confidence
   let confidence = 35;
   if (match.status === 'finished') confidence += 30;
-  if (match.status === 'live' || match.status === 'inprogress') confidence += 20;
+  if (match.status === 'live' || match.status === 'inprogress' || match.status === '2nd_half') confidence += 20;
   if (actualHomeScore !== null) confidence += 15;
   if (leagueId > 0) confidence += 5;
   confidence = Math.min(95, confidence);
 
-  // MATCH RESULT PREDICTION
+  // Match result prediction
   let matchResultPrediction = "DRAW";
   if (homeWinProb > awayWinProb && homeWinProb > drawProb) matchResultPrediction = "HOME WIN";
   else if (awayWinProb > homeWinProb && awayWinProb > drawProb) matchResultPrediction = "AWAY WIN";
 
-  // DOUBLE CHANCE PREDICTION
+  // Double chance
   let doubleChancePrediction = "";
   const dc1x = homeWinProb + drawProb;
   const dcx2 = awayWinProb + drawProb;
@@ -150,7 +152,7 @@ function analyzeMatch(match, allMatchesInLeague) {
   else if (dcx2 > dc1x && dcx2 > dc12) doubleChancePrediction = "AWAY OR DRAW (X2)";
   else doubleChancePrediction = "HOME OR AWAY (12)";
 
-  // SAFEST BET - Highest probability market above threshold
+  // Safest bet
   let safestBet = "NO BET";
   let safestProb = 0;
   const candidates = [
@@ -158,8 +160,8 @@ function analyzeMatch(match, allMatchesInLeague) {
     { name: "AWAY WIN", prob: awayWinProb },
     { name: "HOME DOUBLE CHANCE (1X)", prob: dc1x },
     { name: "AWAY DOUBLE CHANCE (X2)", prob: dcx2 },
-    { name: "OVER 1.5 GOALS", prob: over15Prob },
-    { name: "OVER 2.5 GOALS", prob: over25Prob },
+    { name: "OVER 1.5 GOALS", prob: over15 },
+    { name: "OVER 2.5 GOALS", prob: over25 },
     { name: "BTTS - YES", prob: bttsProb }
   ];
   candidates.forEach(function(c) {
@@ -182,16 +184,17 @@ function analyzeMatch(match, allMatchesInLeague) {
     expectedGoals: { home: homeXg.toFixed(2), away: awayXg.toFixed(2), total: totalXg.toFixed(2) },
     predictions: { matchResult: matchResultPrediction, doubleChance: doubleChancePrediction },
     markets: {
-      over15: over15Prob, under15: 100 - over15Prob,
-      over25: over25Prob, under25: 100 - over25Prob,
-      over35: over35Prob, under35: 100 - over35Prob,
-      over45: over45Prob, under45: 100 - over45Prob,
+      over15: over15, under15: under15,
+      over25: over25, under25: under25,
+      over35: over35, under35: under35,
+      over45: over45, under45: under45,
       bttsYes: bttsProb, bttsNo: 100 - bttsProb
     },
     analysis: { confidence: confidence, safestBet: safestBet, probability: safestProb, verdict: verdict }
   };
 }
 
+// TODAY ENDPOINT
 app.get('/api/today', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
@@ -199,24 +202,38 @@ app.get('/api/today', async (req, res) => {
     const listUrl = "https://sports.bzzoiro.com/api/events/?limit=10";
     const listResponse = await axios.get(listUrl, { headers: { Authorization: "Token " + API_KEY }, timeout: 10000 });
     const rawEvents = listResponse.data.results || [];
-    if (rawEvents.length === 0) return res.json({ status: "no_matches", message: "No upcoming matches found today." });
-    const analyzedMatches = rawEvents.map(function(m) { return analyzeMatch(m); });
+    if (rawEvents.length === 0) return res.json({ status: "no_matches", message: "No matches found today." });
+    const analyzedMatches = rawEvents.map(analyzeMatch);
     res.json({ status: "success", count: analyzedMatches.length, matches: analyzedMatches });
   } catch (error) {
     res.status(500).json({ error: "Failed: " + error.message });
   }
 });
 
+// SEARCH ENDPOINT (Now includes finished matches too)
 app.get('/api/analyze', async (req, res) => {
   const teamName = req.query.teamName || 'Arsenal';
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
+  
   try {
-    const listUrl = "https://sports.bzzoiro.com/api/events/?team_name=" + encodeURIComponent(teamName) + "&limit=10";
+    // Fetch upcoming, live, AND finished matches
+    const listUrl = "https://sports.bzzoiro.com/api/events/?team_name=" + encodeURIComponent(teamName) + "&limit=20";
     const listResponse = await axios.get(listUrl, { headers: { Authorization: "Token " + API_KEY }, timeout: 10000 });
     const rawEvents = listResponse.data.results || [];
+    
     if (rawEvents.length === 0) return res.json({ status: "no_matches", message: "No matches found for " + teamName + ". Try another team name." });
-    const analyzedMatches = rawEvents.map(function(m) { return analyzeMatch(m); });
+    
+    const analyzedMatches = rawEvents.map(analyzeMatch);
+    
+    // Sort: live first, then upcoming, then finished
+    analyzedMatches.sort(function(a, b) {
+      const priority = { live: 0, inprogress: 0, "2nd_half": 0, upcoming: 1, notstarted: 1, finished: 2 };
+      const aP = priority[a.match.matchStatus] !== undefined ? priority[a.match.matchStatus] : 1;
+      const bP = priority[b.match.matchStatus] !== undefined ? priority[b.match.matchStatus] : 1;
+      return aP - bP;
+    });
+    
     res.json({ status: "success", count: analyzedMatches.length, searchTerm: teamName, matches: analyzedMatches });
   } catch (error) {
     res.status(500).json({ error: "Failed: " + error.message });
