@@ -3,10 +3,8 @@ const axios = require('axios');
 const path = require('path');
 const app = express();
 
-// ============ SECURITY: TRUST PROXY (Render uses a proxy) ============
 app.set('trust proxy', 1);
 
-// ============ SECURITY: CORS — restricted to same origin only ============
 const ALLOWED_ORIGINS = [
   "https://football-engine.onrender.com",
   "http://localhost:3000",
@@ -24,7 +22,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// ============ SECURITY: HEADERS ============
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "SAMEORIGIN");
@@ -44,7 +41,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// ============ SECURITY: RATE LIMITER (in-memory) ============
 const rateLimitStore = {};
 function rateLimit(maxPerMin) {
   return function(req, res, next) {
@@ -61,7 +57,6 @@ function rateLimit(maxPerMin) {
   };
 }
 
-// Clean up rate limit store occasionally
 setInterval(function() {
   const now = Date.now();
   Object.keys(rateLimitStore).forEach(function(ip) {
@@ -70,22 +65,19 @@ setInterval(function() {
   });
 }, 120000);
 
-// ============ BODY SIZE LIMIT ============
 app.use(express.json({ limit: "100kb" }));
-
-// ============ STATIC FILES ============
 app.use(express.static(path.join(__dirname, "public")));
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// ============ CACHE ============
 const CACHE = {
   events: { data: null, timestamp: 0, ttl: 120000 },
   live:   { data: null, timestamp: 0, ttl: 20000 },
   single: {},
   leagues: { data: null, timestamp: 0, ttl: 300000 },
-  teams: { data: null, timestamp: 0, ttl: 300000 }
+  teams: { data: null, timestamp: 0, ttl: 300000 },
+  toppicks: { data: null, timestamp: 0, ttl: 180000 }
 };
 
 function getCache(key) {
@@ -109,7 +101,6 @@ function getSingleCache(id) {
   return e.data;
 }
 
-// ============ HELPERS ============
 function leagueDraw(leagueName) {
   const name = (leagueName || "").toLowerCase();
   if (name.includes("ligue 1")) return 0.30;
@@ -415,6 +406,32 @@ async function fetchEventsPage(API_KEY, limit, offset, extraParams) {
   return resp.data;
 }
 
+// Fetch ALL events up to a max, using pagination
+async function fetchAllEvents(API_KEY, maxTotal, extraParams) {
+  const all = [];
+  const pageSize = 100;
+  let offset = 0;
+  const seenIds = {};
+  for (let i = 0; i < Math.ceil(maxTotal / pageSize); i++) {
+    try {
+      const data = await fetchEventsPage(API_KEY, pageSize, offset, extraParams);
+      const results = data.results || [];
+      results.forEach(function(m) {
+        if (m && m.id && !seenIds[m.id]) {
+          seenIds[m.id] = true;
+          all.push(m);
+        }
+      });
+      if (!data.next || results.length === 0) break;
+      offset += pageSize;
+      if (all.length >= maxTotal) break;
+    } catch (e) {
+      break;
+    }
+  }
+  return all;
+}
+
 function handleApiError(error, res) {
   const status = (error.response && error.response.status) || 500;
   let message = "Failed to fetch from data provider.";
@@ -432,7 +449,6 @@ function handleApiError(error, res) {
   res.status(status).json({ status: "error", error: message });
 }
 
-// ============ INPUT VALIDATION ============
 function validateString(str, maxLen) {
   if (typeof str !== "string") return "";
   if (str.length > maxLen) str = str.substring(0, maxLen);
@@ -447,7 +463,7 @@ function validateInt(val, min, max, defaultVal) {
   return n;
 }
 
-// ============ ENDPOINTS ============
+// ============ MATCHES ============
 app.get("/api/matches", rateLimit(60), async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "Server not configured." });
@@ -581,15 +597,7 @@ app.get("/api/live", rateLimit(60), async (req, res) => {
       rawEvents = liveResp.data.results || [];
     } catch (e) { }
     if (rawEvents.length === 0) {
-      const allEvents = [];
-      for (let page = 0; page < 4; page++) {
-        try {
-          const data = await fetchEventsPage(API_KEY, 100, page * 100, null);
-          const results = data.results || [];
-          allEvents.push.apply(allEvents, results);
-          if (!data.next) break;
-        } catch (e) { break; }
-      }
+      const allEvents = await fetchAllEvents(API_KEY, 400, null);
       rawEvents = allEvents.filter(function(m) {
         const s = (m.status || "").toLowerCase();
         return s === "live" || s === "inprogress" || s === "2nd_half" || s === "1st_half" || s === "halftime";
@@ -625,18 +633,32 @@ app.get("/api/match/:id", rateLimit(60), async (req, res) => {
   }
 });
 
-app.get("/api/top-picks", rateLimit(60), async (req, res) => {
+// ============ FIXED TOP PICKS — scans 300 matches, no cap ============
+app.get("/api/top-picks", rateLimit(30), async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "Server not configured." });
+
+  const cached = getCache("toppicks");
+  if (cached) return res.json(Object.assign({}, cached, { cached: true }));
+
   try {
-    const data = await fetchEventsPage(API_KEY, 50, 0, null);
-    const rawEvents = data.results || [];
+    const rawEvents = await fetchAllEvents(API_KEY, 300, null);
     const analyzed = rawEvents.map(analyzeMatch);
     const topPicks = analyzed.filter(function(m) {
-      return m.analysis.verdict.indexOf("BET") !== -1 && m.analysis.verdict.indexOf("NO BET") === -1 && m.analysis.confidence >= 60;
+      return m.analysis.verdict.indexOf("BET") !== -1 &&
+             m.analysis.verdict.indexOf("NO BET") === -1 &&
+             m.analysis.confidence >= 60;
     });
     topPicks.sort(function(a, b) { return b.analysis.confidence - a.analysis.confidence; });
-    res.json({ status: "success", count: topPicks.length, matches: topPicks.slice(0, 20) });
+
+    const response = {
+      status: "success",
+      count: topPicks.length,
+      scannedTotal: rawEvents.length,
+      matches: topPicks
+    };
+    setCache("toppicks", response);
+    res.json(response);
   } catch (error) {
     handleApiError(error, res);
   }
@@ -648,16 +670,7 @@ app.get("/api/leagues", rateLimit(60), async (req, res) => {
   const cached = getCache("leagues");
   if (cached) return res.json({ status: "success", count: cached.length, leagues: cached, cached: true });
   try {
-    const all = [];
-    let offset = 0;
-    const pageSize = 100;
-    for (let i = 0; i < 2; i++) {
-      const data = await fetchEventsPage(API_KEY, pageSize, offset, null);
-      const results = data.results || [];
-      all.push.apply(all, results);
-      if (!data.next) break;
-      offset += pageSize;
-    }
+    const all = await fetchAllEvents(API_KEY, 300, null);
     const leagueMap = {};
     all.forEach(function(match) {
       let name = "Unknown Competition";
@@ -686,16 +699,7 @@ app.get("/api/league-matches", rateLimit(60), async (req, res) => {
   if (!API_KEY) return res.status(500).json({ error: "Server not configured." });
   if (!leagueName) return res.status(400).json({ error: "League name required." });
   try {
-    const all = [];
-    let offset = 0;
-    const pageSize = 100;
-    for (let i = 0; i < 2; i++) {
-      const data = await fetchEventsPage(API_KEY, pageSize, offset, null);
-      const results = data.results || [];
-      all.push.apply(all, results);
-      if (!data.next) break;
-      offset += pageSize;
-    }
+    const all = await fetchAllEvents(API_KEY, 300, null);
     const leagueLower = leagueName.toLowerCase();
     const filtered = all.filter(function(m) {
       let name = "";
@@ -716,16 +720,7 @@ app.get("/api/teams", rateLimit(60), async (req, res) => {
   const cached = getCache("teams");
   if (cached) return res.json({ status: "success", count: cached.length, teams: cached, cached: true });
   try {
-    const all = [];
-    let offset = 0;
-    const pageSize = 100;
-    for (let i = 0; i < 2; i++) {
-      const data = await fetchEventsPage(API_KEY, pageSize, offset, null);
-      const results = data.results || [];
-      all.push.apply(all, results);
-      if (!data.next) break;
-      offset += pageSize;
-    }
+    const all = await fetchAllEvents(API_KEY, 300, null);
     const teamMap = {};
     all.forEach(function(match) {
       const home = getTeamName(match.home_team);
@@ -786,7 +781,7 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-app.get("/api/stats", rateLimit(60), async (req, res) => {
+app.get("/api/stats", rateLimit(30), async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "Server not configured." });
   try {
@@ -848,7 +843,6 @@ app.post("/api/refresh", rateLimit(30), (req, res) => {
   res.json({ status: "success", message: "Cache cleared." });
 });
 
-// ============ 404 & GLOBAL ERROR ============
 app.use((req, res) => {
   res.status(404).json({ status: "error", error: "Endpoint not found." });
 });
