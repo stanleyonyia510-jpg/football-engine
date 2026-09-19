@@ -3,17 +3,83 @@ const axios = require('axios');
 const path = require('path');
 const app = express();
 
-app.use(express.json());
+// ============ SECURITY: TRUST PROXY (Render uses a proxy) ============
+app.set('trust proxy', 1);
+
+// ============ SECURITY: CORS — restricted to same origin only ============
+const ALLOWED_ORIGINS = [
+  "https://football-engine.onrender.com",
+  "http://localhost:3000",
+  "http://localhost:5173"
+];
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.indexOf(origin) !== -1) {
+    res.header("Access-Control-Allow-Origin", origin);
+  }
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+  res.header("Vary", "Origin");
+  if (req.method === "OPTIONS") return res.status(204).end();
   next();
 });
-app.use(express.static(path.join(__dirname, 'public')));
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+
+// ============ SECURITY: HEADERS ============
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  res.setHeader("Content-Security-Policy",
+    "default-src 'self'; " +
+    "script-src 'self' 'unsafe-inline'; " +
+    "style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data:; " +
+    "connect-src 'self' https://football-engine.onrender.com; " +
+    "frame-ancestors 'self'; " +
+    "base-uri 'self'; " +
+    "form-action 'self'"
+  );
+  next();
 });
 
+// ============ SECURITY: RATE LIMITER (in-memory) ============
+const rateLimitStore = {};
+function rateLimit(maxPerMin) {
+  return function(req, res, next) {
+    const ip = req.ip || "unknown";
+    const now = Date.now();
+    const windowMs = 60000;
+    if (!rateLimitStore[ip]) rateLimitStore[ip] = [];
+    rateLimitStore[ip] = rateLimitStore[ip].filter(function(t) { return now - t < windowMs; });
+    if (rateLimitStore[ip].length >= maxPerMin) {
+      return res.status(429).json({ status: "error", error: "Too many requests. Please wait a minute." });
+    }
+    rateLimitStore[ip].push(now);
+    next();
+  };
+}
+
+// Clean up rate limit store occasionally
+setInterval(function() {
+  const now = Date.now();
+  Object.keys(rateLimitStore).forEach(function(ip) {
+    rateLimitStore[ip] = rateLimitStore[ip].filter(function(t) { return now - t < 60000; });
+    if (rateLimitStore[ip].length === 0) delete rateLimitStore[ip];
+  });
+}, 120000);
+
+// ============ BODY SIZE LIMIT ============
+app.use(express.json({ limit: "100kb" }));
+
+// ============ STATIC FILES ============
+app.use(express.static(path.join(__dirname, "public")));
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+// ============ CACHE ============
 const CACHE = {
   events: { data: null, timestamp: 0, ttl: 120000 },
   live:   { data: null, timestamp: 0, ttl: 20000 },
@@ -43,6 +109,7 @@ function getSingleCache(id) {
   return e.data;
 }
 
+// ============ HELPERS ============
 function leagueDraw(leagueName) {
   const name = (leagueName || "").toLowerCase();
   if (name.includes("ligue 1")) return 0.30;
@@ -61,7 +128,7 @@ function leagueDraw(leagueName) {
 
 function getTeamName(team) {
   if (!team) return "Unknown";
-  if (typeof team === 'string') return team;
+  if (typeof team === "string") return team;
   if (team.name) return team.name;
   return "Unknown";
 }
@@ -94,17 +161,12 @@ function distinctiveKeyword(name) {
   return core || normalizeName(name);
 }
 
-// Check if a match involves a specific team (fuzzy match)
 function matchInvolvesTeam(match, teamName) {
   if (!teamName) return true;
   const home = getTeamName(match.home_team).toLowerCase();
   const away = getTeamName(match.away_team).toLowerCase();
   const search = teamName.toLowerCase().trim();
-
-  // Direct substring match
   if (home.includes(search) || away.includes(search)) return true;
-
-  // Try individual keywords (for multi-word names)
   const searchWords = search.split(/\s+/).filter(function(w) { return w.length > 3; });
   for (let i = 0; i < searchWords.length; i++) {
     if (home.includes(searchWords[i]) || away.includes(searchWords[i])) return true;
@@ -150,22 +212,18 @@ function matchTeamText(teamText, homeName, awayName) {
   const awayCore = coreName(awayName);
   const homeKey = distinctiveKeyword(homeName);
   const awayKey = distinctiveKeyword(awayName);
-
   const homeCoreMatch = homeCore.length > 2 && textNorm.indexOf(homeCore) !== -1;
   const awayCoreMatch = awayCore.length > 2 && textNorm.indexOf(awayCore) !== -1;
   if (homeCoreMatch && !awayCoreMatch) return "HOME";
   if (awayCoreMatch && !homeCoreMatch) return "AWAY";
-
   const homeKeyMatch = homeKey && textNorm.indexOf(homeKey) !== -1;
   const awayKeyMatch = awayKey && textNorm.indexOf(awayKey) !== -1;
   if (homeKeyMatch && !awayKeyMatch) return "HOME";
   if (awayKeyMatch && !homeKeyMatch) return "AWAY";
-
   const homeFullMatch = textNorm.indexOf(normalizeName(homeName)) !== -1;
   const awayFullMatch = textNorm.indexOf(normalizeName(awayName)) !== -1;
   if (homeFullMatch && !awayFullMatch) return "HOME";
   if (awayFullMatch && !homeFullMatch) return "AWAY";
-
   return null;
 }
 
@@ -177,34 +235,24 @@ function parseAIPrediction(aiText, homeTeam, awayTeam) {
   if (!predictionLine) return null;
   const parsed = parsePredictionScore(predictionLine);
   if (!parsed) return null;
-
   const firstTeamSide = matchTeamText(parsed.firstTeamText, homeName, awayName);
   const secondTeamSide = matchTeamText(parsed.secondTeamText, homeName, awayName);
-
   let predictedHomeScore = null, predictedAwayScore = null;
   if (firstTeamSide === "HOME") { predictedHomeScore = parsed.firstScore; predictedAwayScore = parsed.secondScore; }
   else if (firstTeamSide === "AWAY") { predictedAwayScore = parsed.firstScore; predictedHomeScore = parsed.secondScore; }
   else if (secondTeamSide === "HOME") { predictedHomeScore = parsed.secondScore; predictedAwayScore = parsed.firstScore; }
   else if (secondTeamSide === "AWAY") { predictedAwayScore = parsed.secondScore; predictedHomeScore = parsed.firstScore; }
   else return null;
-
   let predictedWinner = "DRAW";
   if (predictedHomeScore > predictedAwayScore) predictedWinner = "HOME";
   else if (predictedAwayScore > predictedHomeScore) predictedWinner = "AWAY";
-
-  return {
-    predictedHomeScore: predictedHomeScore,
-    predictedAwayScore: predictedAwayScore,
-    predictedWinner: predictedWinner,
-    predictionLine: predictionLine
-  };
+  return { predictedHomeScore: predictedHomeScore, predictedAwayScore: predictedAwayScore, predictedWinner: predictedWinner, predictionLine: predictionLine };
 }
 
 function probabilitiesFromScoreline(homeScore, awayScore, leagueName) {
   const totalGoals = homeScore + awayScore;
   const goalDiff = homeScore - awayScore;
   let homeWin, draw, awayWin;
-
   if (goalDiff >= 3) { homeWin = 78; draw = 12; awayWin = 10; }
   else if (goalDiff === 2) { homeWin = 68; draw = 18; awayWin = 14; }
   else if (goalDiff === 1) { homeWin = 55; draw = 24; awayWin = 21; }
@@ -216,7 +264,6 @@ function probabilitiesFromScoreline(homeScore, awayScore, leagueName) {
   else if (goalDiff === -1) { homeWin = 21; draw = 24; awayWin = 55; }
   else if (goalDiff === -2) { homeWin = 14; draw = 18; awayWin = 68; }
   else { homeWin = 10; draw = 12; awayWin = 78; }
-
   const leagueDrawRate = leagueDraw(leagueName);
   const drawAdjust = (leagueDrawRate - 0.27) * 20;
   draw = Math.max(10, Math.min(50, draw + drawAdjust));
@@ -239,13 +286,11 @@ function goalsFromScoreline(homeScore, awayScore) {
   else if (totalGoals === 4) { over15 = 98; over25 = 90; over35 = 65; over45 = 32; }
   else if (totalGoals === 5) { over15 = 99; over25 = 95; over35 = 82; over45 = 55; }
   else { over15 = 99; over25 = 97; over35 = 90; over45 = 75; }
-
   let bttsProb;
   if (homeScored && awayScored) bttsProb = totalGoals >= 4 ? 90 : (totalGoals === 3 ? 82 : 70);
   else if (homeScored) bttsProb = 22;
   else if (awayScored) bttsProb = 20;
   else bttsProb = 8;
-
   return {
     over15: over15, under15: 100 - over15,
     over25: over25, under25: 100 - over25,
@@ -266,33 +311,22 @@ function fallbackGoals() {
 function analyzeMatch(match) {
   const homeTeamName = getTeamName(match.home_team);
   const awayTeamName = getTeamName(match.away_team);
-
   let leagueName = "Unknown Competition";
   let leagueCountry = "";
-  if (match.league && match.league.name) {
-    leagueName = match.league.name;
-    leagueCountry = match.league.country || "";
-  }
+  if (match.league && match.league.name) { leagueName = match.league.name; leagueCountry = match.league.country || ""; }
   else if (match.league_name) leagueName = match.league_name;
-
   let aiPreview = "";
   if (match.ai_preview && match.ai_preview.text) aiPreview = match.ai_preview.text;
-
   let aiPrediction = null;
   if (aiPreview) aiPrediction = parseAIPrediction(aiPreview, match.home_team, match.away_team);
-
   let homeWinProb, drawProb, awayWinProb;
   if (aiPrediction) {
     const probs = probabilitiesFromScoreline(aiPrediction.predictedHomeScore, aiPrediction.predictedAwayScore, leagueName);
     homeWinProb = probs.homeWin; drawProb = probs.draw; awayWinProb = probs.awayWin;
-  } else {
-    homeWinProb = 40; drawProb = 28; awayWinProb = 32;
-  }
-
+  } else { homeWinProb = 40; drawProb = 28; awayWinProb = 32; }
   let markets;
   if (aiPrediction) markets = goalsFromScoreline(aiPrediction.predictedHomeScore, aiPrediction.predictedAwayScore);
   else markets = fallbackGoals();
-
   let matchResultPrediction = "NO CLEAR AI PREDICTION";
   let doubleChancePrediction = "NO CLEAR AI PREDICTION";
   if (aiPrediction) {
@@ -300,46 +334,38 @@ function analyzeMatch(match) {
     else if (aiPrediction.predictedWinner === "AWAY") { matchResultPrediction = "AWAY WIN"; doubleChancePrediction = "AWAY OR DRAW (X2)"; }
     else { matchResultPrediction = "DRAW"; doubleChancePrediction = "HOME OR DRAW (1X)"; }
   }
-
   let safestBet = "NO BET", safestProb = 0;
   if (aiPrediction) {
     if (aiPrediction.predictedWinner === "HOME") { safestBet = "HOME WIN"; safestProb = homeWinProb; }
     else if (aiPrediction.predictedWinner === "AWAY") { safestBet = "AWAY WIN"; safestProb = awayWinProb; }
     else { safestBet = "DRAW"; safestProb = drawProb; }
   }
-
   let confidence = 40;
   if (aiPrediction) confidence += 20;
   const status = match.status || "unknown";
   const hasScore = match.home_score !== null && match.home_score !== undefined && match.home_score !== "";
   if (hasScore) confidence += 10;
-  if (status === 'finished') confidence += 10;
+  if (status === "finished") confidence += 10;
   confidence = Math.min(85, confidence);
-
   let confidenceLabel = "LOW";
   if (confidence >= 50) confidenceLabel = "MODERATE";
   if (confidence >= 70) confidenceLabel = "HIGH";
-
   let verdict = "🔴 NO BET";
   if (aiPrediction && confidence >= 50) verdict = "🟡 WAIT FOR MORE INFORMATION";
   if (aiPrediction && confidence >= 60 && safestProb >= 50) verdict = "🟢 BET";
-
   let venue = "";
   if (match.venue && match.venue.name) venue = match.venue.name;
   let referee = "";
   if (match.referee && match.referee.name) referee = match.referee.name;
-
   const aiPredictionOutput = aiPrediction ? {
     predictedHomeScore: aiPrediction.predictedHomeScore,
     predictedAwayScore: aiPrediction.predictedAwayScore,
     predictedWinner: aiPrediction.predictedWinner,
     predictionLine: aiPrediction.predictionLine
   } : null;
-
   const homeScoreVal = (match.home_score !== null && match.home_score !== undefined && match.home_score !== "") ? parseInt(match.home_score) : null;
   const awayScoreVal = (match.away_score !== null && match.away_score !== undefined && match.away_score !== "") ? parseInt(match.away_score) : null;
   const currentMinuteVal = (match.current_minute !== null && match.current_minute !== undefined) ? match.current_minute : null;
-
   return {
     matchId: match.id || null,
     match: {
@@ -391,30 +417,45 @@ async function fetchEventsPage(API_KEY, limit, offset, extraParams) {
 
 function handleApiError(error, res) {
   const status = (error.response && error.response.status) || 500;
-  let message = "Failed to fetch from Bzzoiro.";
-  if (status === 401) message = "API key rejected.";
-  else if (status === 402) message = "This data requires a paid Bzzoiro add-on.";
+  let message = "Failed to fetch from data provider.";
+  if (status === 401) message = "Data provider rejected credentials.";
+  else if (status === 402) message = "This data requires a paid plan.";
   else if (status === 403) message = "Access forbidden.";
   else if (status === 404) message = "Resource not found.";
+  else if (status === 408) message = "Data provider timed out.";
   else if (status === 429) message = "Too many requests. Please wait a moment.";
-  else if (error.code === 'ECONNABORTED' || (error.message && error.message.indexOf('timeout') !== -1)) {
-    message = "Bzzoiro is taking too long. Please try again in 30 seconds.";
-    res.status(504).json({ status: "error", error: message, statusCode: 504 });
-    return;
+  else if (status === 500 || status === 502 || status === 503) message = "Data provider is unavailable.";
+  else if (error.code === "ECONNABORTED" || (error.message && error.message.indexOf("timeout") !== -1)) {
+    message = "Data provider is taking too long. Please try again.";
+    return res.status(504).json({ status: "error", error: message });
   }
-  else if (error.message) message = error.message;
-  res.status(status).json({ status: "error", error: message, statusCode: status });
+  res.status(status).json({ status: "error", error: message });
 }
 
-app.get('/api/matches', async (req, res) => {
-  const API_KEY = process.env.BZZOIRO_API_KEY;
-  if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
+// ============ INPUT VALIDATION ============
+function validateString(str, maxLen) {
+  if (typeof str !== "string") return "";
+  if (str.length > maxLen) str = str.substring(0, maxLen);
+  return str.replace(/[<>]/g, "").trim();
+}
 
-  const page = parseInt(req.query.page) || 0;
-  const size = Math.min(parseInt(req.query.size) || 50, 100);
-  const dateFilter = req.query.date || "";
-  const statusFilter = req.query.status || "all";
-  const sortBy = req.query.sort || "time";
+function validateInt(val, min, max, defaultVal) {
+  const n = parseInt(val);
+  if (isNaN(n)) return defaultVal;
+  if (n < min) return min;
+  if (n > max) return max;
+  return n;
+}
+
+// ============ ENDPOINTS ============
+app.get("/api/matches", rateLimit(60), async (req, res) => {
+  const API_KEY = process.env.BZZOIRO_API_KEY;
+  if (!API_KEY) return res.status(500).json({ error: "Server not configured." });
+  const page = validateInt(req.query.page, 0, 100, 0);
+  const size = validateInt(req.query.size, 10, 100, 50);
+  const dateFilter = validateString(req.query.date || "", 20);
+  const statusFilter = validateString(req.query.status || "all", 20);
+  const sortBy = validateString(req.query.sort || "time", 20);
 
   const cacheKey = "events_" + page + "" + size + "" + dateFilter + "_" + statusFilter;
   const cached = getCache(cacheKey);
@@ -436,24 +477,20 @@ app.get('/api/matches', async (req, res) => {
     } else if (/^\d{4}-\d{2}-\d{2}$/.test(dateFilter)) {
       extraParams.date_from = dateFilter; extraParams.date_to = dateFilter;
     }
-
     const offset = page * size;
     const data = await fetchEventsPage(API_KEY, size, offset, extraParams);
     let rawEvents = data.results || [];
-
     if (statusFilter !== "all") {
       const want = statusFilter.toLowerCase();
       rawEvents = rawEvents.filter(function(m) {
         const s = (m.status || "").toLowerCase();
-        if (want === "live") return s === 'live' || s === 'inprogress' || s === '2nd_half' || s === '1st_half' || s === 'halftime';
-        if (want === "upcoming") return s === 'notstarted' || s === 'scheduled' || s === 'upcoming' || s === 'ns';
-        if (want === 'finished') return s === 'finished' || s === 'ft';
+        if (want === "live") return s === "live" || s === "inprogress" || s === "2nd_half" || s === "1st_half" || s === "halftime";
+        if (want === "upcoming") return s === "notstarted" || s === "scheduled" || s === "upcoming" || s === "ns";
+        if (want === "finished") return s === "finished" || s === "ft";
         return true;
       });
     }
-
     const analyzed = rawEvents.map(analyzeMatch);
-
     if (sortBy === "confidence") analyzed.sort(function(a, b) { return b.analysis.confidence - a.analysis.confidence; });
     else if (sortBy === "league") analyzed.sort(function(a, b) { return (a.match.league || "").localeCompare(b.match.league || ""); });
     else if (sortBy === "status") {
@@ -466,10 +503,8 @@ app.get('/api/matches', async (req, res) => {
     } else {
       analyzed.sort(function(a, b) { return new Date(a.match.kickoff) - new Date(b.match.kickoff); });
     }
-
     const totalCount = data.count || data.total || analyzed.length;
     const hasMore = data.next !== null && data.next !== undefined ? !!data.next : (rawEvents.length === size);
-
     const response = {
       status: "success",
       count: analyzed.length,
@@ -480,9 +515,9 @@ app.get('/api/matches', async (req, res) => {
       dateFilter: dateFilter,
       statusFilter: statusFilter,
       sortBy: sortBy,
+      lastUpdated: new Date().toISOString(),
       matches: analyzed
     };
-
     setCache(cacheKey, response);
     res.json(response);
   } catch (error) {
@@ -490,13 +525,11 @@ app.get('/api/matches', async (req, res) => {
   }
 });
 
-app.get('/api/today', async (req, res) => {
+app.get("/api/today", rateLimit(60), async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
-  if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
-
+  if (!API_KEY) return res.status(500).json({ error: "Server not configured." });
   const cached = getCache("events");
   if (cached) return res.json({ status: "success", count: cached.length, matches: cached, cached: true });
-
   try {
     const data = await fetchEventsPage(API_KEY, 50, 0, null);
     const rawEvents = data.results || [];
@@ -508,36 +541,24 @@ app.get('/api/today', async (req, res) => {
   }
 });
 
-// ============ FIXED SEARCH — filters to real matches for the searched team ============
-app.get('/api/analyze', async (req, res) => {
-  const teamName = req.query.teamName || '';
+app.get("/api/analyze", rateLimit(60), async (req, res) => {
+  const teamName = validateString(req.query.teamName || "", 60);
   const API_KEY = process.env.BZZOIRO_API_KEY;
-  if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
-
+  if (!API_KEY) return res.status(500).json({ error: "Server not configured." });
   try {
-    if (!teamName || teamName.trim() === '') {
+    if (!teamName || teamName.trim() === "") {
       const data = await fetchEventsPage(API_KEY, 50, 0, null);
       const rawEvents = data.results || [];
       const analyzed = rawEvents.map(analyzeMatch);
       return res.json({ status: "success", count: analyzed.length, matches: analyzed });
     }
-
     const params = { limit: 100, team_name: teamName };
     const data = await fetchEventsPage(API_KEY, 100, 0, params);
     let rawEvents = data.results || [];
-
-    // Filter to only matches where the searched team actually plays
-    rawEvents = rawEvents.filter(function(m) {
-      return matchInvolvesTeam(m, teamName);
-    });
-
+    rawEvents = rawEvents.filter(function(m) { return matchInvolvesTeam(m, teamName); });
     if (rawEvents.length === 0) {
-      return res.json({
-        status: "no_matches",
-        message: "No matches found for '" + teamName + "'. Try a different team name."
-      });
+      return res.json({ status: "no_matches", message: "No matches found for '" + teamName + "'." });
     }
-
     const analyzed = rawEvents.map(analyzeMatch);
     res.json({ status: "success", count: analyzed.length, searchTerm: teamName, matches: analyzed });
   } catch (error) {
@@ -545,13 +566,11 @@ app.get('/api/analyze', async (req, res) => {
   }
 });
 
-app.get('/api/live', async (req, res) => {
+app.get("/api/live", rateLimit(60), async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
-  if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
-
+  if (!API_KEY) return res.status(500).json({ error: "Server not configured." });
   const cached = getCache("live");
   if (cached) return res.json({ status: "success", count: cached.length, matches: cached, cached: true });
-
   try {
     let rawEvents = [];
     try {
@@ -561,7 +580,6 @@ app.get('/api/live', async (req, res) => {
       });
       rawEvents = liveResp.data.results || [];
     } catch (e) { }
-
     if (rawEvents.length === 0) {
       const allEvents = [];
       for (let page = 0; page < 4; page++) {
@@ -574,27 +592,24 @@ app.get('/api/live', async (req, res) => {
       }
       rawEvents = allEvents.filter(function(m) {
         const s = (m.status || "").toLowerCase();
-        return s === 'live' || s === 'inprogress' || s === '2nd_half' || s === '1st_half' || s === 'halftime';
+        return s === "live" || s === "inprogress" || s === "2nd_half" || s === "1st_half" || s === "halftime";
       });
     }
-
     const analyzed = rawEvents.map(analyzeMatch);
     setCache("live", analyzed);
-    res.json({ status: "success", count: analyzed.length, matches: analyzed });
+    res.json({ status: "success", count: analyzed.length, matches: analyzed, lastUpdated: new Date().toISOString() });
   } catch (error) {
     handleApiError(error, res);
   }
 });
 
-app.get('/api/match/:id', async (req, res) => {
-  const matchId = req.params.id;
+app.get("/api/match/:id", rateLimit(60), async (req, res) => {
+  const matchId = validateString(req.params.id || "", 30);
   const API_KEY = process.env.BZZOIRO_API_KEY;
-  if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
+  if (!API_KEY) return res.status(500).json({ error: "Server not configured." });
   if (!matchId) return res.status(400).json({ error: "Match ID required." });
-
   const cached = getSingleCache(matchId);
   if (cached) return res.json({ status: "success", match: cached, cached: true });
-
   try {
     const resp = await axios.get("https://sports.bzzoiro.com/api/events/" + matchId + "/", {
       headers: { Authorization: "Token " + API_KEY },
@@ -610,33 +625,28 @@ app.get('/api/match/:id', async (req, res) => {
   }
 });
 
-app.get('/api/top-picks', async (req, res) => {
+app.get("/api/top-picks", rateLimit(60), async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
-  if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
-
+  if (!API_KEY) return res.status(500).json({ error: "Server not configured." });
   try {
     const data = await fetchEventsPage(API_KEY, 50, 0, null);
     const rawEvents = data.results || [];
     const analyzed = rawEvents.map(analyzeMatch);
-
     const topPicks = analyzed.filter(function(m) {
       return m.analysis.verdict.indexOf("BET") !== -1 && m.analysis.verdict.indexOf("NO BET") === -1 && m.analysis.confidence >= 60;
     });
     topPicks.sort(function(a, b) { return b.analysis.confidence - a.analysis.confidence; });
-
     res.json({ status: "success", count: topPicks.length, matches: topPicks.slice(0, 20) });
   } catch (error) {
     handleApiError(error, res);
   }
 });
 
-app.get('/api/leagues', async (req, res) => {
+app.get("/api/leagues", rateLimit(60), async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
-  if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
-
+  if (!API_KEY) return res.status(500).json({ error: "Server not configured." });
   const cached = getCache("leagues");
   if (cached) return res.json({ status: "success", count: cached.length, leagues: cached, cached: true });
-
   try {
     const all = [];
     let offset = 0;
@@ -648,7 +658,6 @@ app.get('/api/leagues', async (req, res) => {
       if (!data.next) break;
       offset += pageSize;
     }
-
     const leagueMap = {};
     all.forEach(function(match) {
       let name = "Unknown Competition";
@@ -658,14 +667,12 @@ app.get('/api/leagues', async (req, res) => {
       if (!leagueMap[name]) leagueMap[name] = { name: name, country: country, count: 0, liveCount: 0 };
       leagueMap[name].count++;
       const s = (match.status || "").toLowerCase();
-      if (s === 'live' || s === 'inprogress' || s === '2nd_half' || s === '1st_half' || s === 'halftime') {
+      if (s === "live" || s === "inprogress" || s === "2nd_half" || s === "1st_half" || s === "halftime") {
         leagueMap[name].liveCount++;
       }
     });
-
     const leagues = Object.keys(leagueMap).map(function(k) { return leagueMap[k]; });
     leagues.sort(function(a, b) { return b.count - a.count; });
-
     setCache("leagues", leagues);
     res.json({ status: "success", count: leagues.length, leagues: leagues });
   } catch (error) {
@@ -673,12 +680,11 @@ app.get('/api/leagues', async (req, res) => {
   }
 });
 
-app.get('/api/league-matches', async (req, res) => {
-  const leagueName = req.query.name || '';
+app.get("/api/league-matches", rateLimit(60), async (req, res) => {
+  const leagueName = validateString(req.query.name || "", 80);
   const API_KEY = process.env.BZZOIRO_API_KEY;
-  if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
+  if (!API_KEY) return res.status(500).json({ error: "Server not configured." });
   if (!leagueName) return res.status(400).json({ error: "League name required." });
-
   try {
     const all = [];
     let offset = 0;
@@ -690,7 +696,6 @@ app.get('/api/league-matches', async (req, res) => {
       if (!data.next) break;
       offset += pageSize;
     }
-
     const leagueLower = leagueName.toLowerCase();
     const filtered = all.filter(function(m) {
       let name = "";
@@ -698,7 +703,6 @@ app.get('/api/league-matches', async (req, res) => {
       else if (m.league_name) name = m.league_name;
       return name.toLowerCase() === leagueLower;
     });
-
     const analyzed = filtered.map(analyzeMatch);
     res.json({ status: "success", count: analyzed.length, leagueName: leagueName, matches: analyzed });
   } catch (error) {
@@ -706,13 +710,11 @@ app.get('/api/league-matches', async (req, res) => {
   }
 });
 
-app.get('/api/teams', async (req, res) => {
+app.get("/api/teams", rateLimit(60), async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
-  if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
-
+  if (!API_KEY) return res.status(500).json({ error: "Server not configured." });
   const cached = getCache("teams");
   if (cached) return res.json({ status: "success", count: cached.length, teams: cached, cached: true });
-
   try {
     const all = [];
     let offset = 0;
@@ -724,7 +726,6 @@ app.get('/api/teams', async (req, res) => {
       if (!data.next) break;
       offset += pageSize;
     }
-
     const teamMap = {};
     all.forEach(function(match) {
       const home = getTeamName(match.home_team);
@@ -734,25 +735,18 @@ app.get('/api/teams', async (req, res) => {
         if (!teamMap[name]) teamMap[name] = { name: name, count: 0, liveCount: 0, countries: {} };
         teamMap[name].count++;
         const s = (match.status || "").toLowerCase();
-        if (s === 'live' || s === 'inprogress' || s === '2nd_half' || s === '1st_half' || s === 'halftime') {
+        if (s === "live" || s === "inprogress" || s === "2nd_half" || s === "1st_half" || s === "halftime") {
           teamMap[name].liveCount++;
         }
         const country = (match.league && match.league.country) ? match.league.country : "";
         if (country) teamMap[name].countries[country] = true;
       });
     });
-
     const teams = Object.keys(teamMap).map(function(k) {
       const t = teamMap[k];
-      return {
-        name: t.name,
-        count: t.count,
-        liveCount: t.liveCount,
-        country: Object.keys(t.countries)[0] || ""
-      };
+      return { name: t.name, count: t.count, liveCount: t.liveCount, country: Object.keys(t.countries)[0] || "" };
     });
     teams.sort(function(a, b) { return b.count - a.count; });
-
     setCache("teams", teams);
     res.json({ status: "success", count: teams.length, teams: teams });
   } catch (error) {
@@ -760,21 +754,16 @@ app.get('/api/teams', async (req, res) => {
   }
 });
 
-app.get('/api/team-matches', async (req, res) => {
-  const teamName = req.query.name || '';
+app.get("/api/team-matches", rateLimit(60), async (req, res) => {
+  const teamName = validateString(req.query.name || "", 60);
   const API_KEY = process.env.BZZOIRO_API_KEY;
-  if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
+  if (!API_KEY) return res.status(500).json({ error: "Server not configured." });
   if (!teamName) return res.status(400).json({ error: "Team name required." });
-
   try {
     const params = { limit: 100, team_name: teamName };
     const data = await fetchEventsPage(API_KEY, 100, 0, params);
     const rawEvents = data.results || [];
-
-    const filtered = rawEvents.filter(function(m) {
-      return matchInvolvesTeam(m, teamName);
-    });
-
+    const filtered = rawEvents.filter(function(m) { return matchInvolvesTeam(m, teamName); });
     const analyzed = filtered.map(analyzeMatch);
     analyzed.sort(function(a, b) {
       const priority = { live: 0, inprogress: 0, "2nd_half": 0, "1st_half": 0, halftime: 0, notstarted: 1, scheduled: 1, upcoming: 1, finished: 2 };
@@ -783,16 +772,62 @@ app.get('/api/team-matches', async (req, res) => {
       if (ap !== bp) return ap - bp;
       return new Date(a.match.kickoff) - new Date(b.match.kickoff);
     });
-
     res.json({ status: "success", count: analyzed.length, teamName: teamName, matches: analyzed });
   } catch (error) {
     handleApiError(error, res);
   }
 });
 
-app.get('/api/debug', async (req, res) => {
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    apiConfigured: !!process.env.BZZOIRO_API_KEY
+  });
+});
+
+app.get("/api/stats", rateLimit(60), async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
-  if (!API_KEY) return res.status(500).json({ error: "No API key" });
+  if (!API_KEY) return res.status(500).json({ error: "Server not configured." });
+  try {
+    const data = await fetchEventsPage(API_KEY, 100, 0, null);
+    const rawEvents = data.results || [];
+    const total = data.count || data.total || rawEvents.length;
+    let live = 0, upcoming = 0, finished = 0;
+    const leagues = {}, countries = {}, teams = {};
+    rawEvents.forEach(function(m) {
+      const s = (m.status || "").toLowerCase();
+      if (s === "live" || s === "inprogress" || s === "2nd_half" || s === "1st_half" || s === "halftime") live++;
+      else if (s === "finished" || s === "ft") finished++;
+      else upcoming++;
+      const l = (m.league && m.league.name) ? m.league.name : "Unknown";
+      const c = (m.league && m.league.country) ? m.league.country : "Unknown";
+      leagues[l] = (leagues[l] || 0) + 1;
+      countries[c] = (countries[c] || 0) + 1;
+      const h = getTeamName(m.home_team);
+      const a = getTeamName(m.away_team);
+      teams[h] = (teams[h] || 0) + 1;
+      teams[a] = (teams[a] || 0) + 1;
+    });
+    res.json({
+      status: "success",
+      totalMatchesAvailable: total,
+      liveMatches: live,
+      upcomingMatches: upcoming,
+      finishedMatches: finished,
+      leaguesCount: Object.keys(leagues).length,
+      countriesCount: Object.keys(countries).length,
+      teamsCount: Object.keys(teams).length,
+      lastUpdated: new Date().toISOString()
+    });
+  } catch (error) {
+    handleApiError(error, res);
+  }
+});
+
+app.get("/api/debug", rateLimit(20), async (req, res) => {
+  const API_KEY = process.env.BZZOIRO_API_KEY;
+  if (!API_KEY) return res.status(500).json({ error: "Server not configured." });
   try {
     const data = await fetchEventsPage(API_KEY, 3, 0, null);
     res.json({
@@ -805,12 +840,22 @@ app.get('/api/debug', async (req, res) => {
   }
 });
 
-app.post('/api/refresh', (req, res) => {
+app.post("/api/refresh", rateLimit(30), (req, res) => {
   Object.keys(CACHE).forEach(function(k) {
-    if (k === 'single') { CACHE.single = {}; }
+    if (k === "single") { CACHE.single = {}; }
     else { CACHE[k].data = null; CACHE[k].timestamp = 0; }
   });
   res.json({ status: "success", message: "Cache cleared." });
+});
+
+// ============ 404 & GLOBAL ERROR ============
+app.use((req, res) => {
+  res.status(404).json({ status: "error", error: "Endpoint not found." });
+});
+
+app.use((err, req, res, next) => {
+  console.error("Server error:", err.message);
+  res.status(500).json({ status: "error", error: "Internal server error." });
 });
 
 const PORT = process.env.PORT || 3000;
