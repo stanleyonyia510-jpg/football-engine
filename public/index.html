@@ -6,79 +6,102 @@
     <title>Elite Football Predictor</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #f1f5f9; min-height: 100vh; padding: 20px; }
-        .container { max-width: 900px; margin: 0 auto; }
-        header { text-align: center; padding: 30px 0 20px 0; }
-        header h1 { font-size: 2.2rem; background: linear-gradient(90deg, #10b981, #3b82f6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 8px; }
-        header p { color: #94a3b8; font-size: 1rem; }
-        
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #f1f5f9; min-height: 100vh; padding: 15px; }
+        .container { max-width: 900px; margin: 0 auto; padding-bottom: 40px; }
+        header { text-align: center; padding: 20px 0 15px 0; }
+        header h1 { font-size: 2rem; background: linear-gradient(90deg, #10b981, #3b82f6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 6px; }
+        header p { color: #94a3b8; font-size: 0.95rem; }
+
         /* TABS */
-        .tabs { display: flex; gap: 10px; margin-bottom: 20px; justify-content: center; }
-        .tab { padding: 12px 24px; border-radius: 100px; border: 2px solid #334155; background: #1e293b; color: #94a3b8; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .tabs { display: flex; gap: 8px; margin-bottom: 15px; flex-wrap: wrap; justify-content: center; }
+        .tab { padding: 10px 16px; border-radius: 100px; border: 2px solid #334155; background: #1e293b; color: #94a3b8; font-weight: 600; cursor: pointer; font-size: 0.85rem; transition: all 0.2s; }
         .tab.active { background: linear-gradient(90deg, #10b981, #059669); color: white; border-color: transparent; }
-        .tab:hover { transform: scale(1.05); }
-        
-        .search-box { display: flex; gap: 10px; margin-bottom: 20px; }
-        input { flex: 1; padding: 14px 18px; border-radius: 12px; border: 2px solid #334155; background: #1e293b; color: #f1f5f9; font-size: 1rem; outline: none; }
-        input:focus { border-color: #10b981; }
-        button.search-btn { padding: 14px 26px; border-radius: 12px; border: none; background: linear-gradient(90deg, #10b981, #059669); color: white; font-size: 1rem; font-weight: 600; cursor: pointer; }
-        button.search-btn:hover { transform: scale(1.05); }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
-        
-        /* MATCH LIST */
-        .match-list-item { background: #1e293b; border-radius: 14px; padding: 18px; margin-bottom: 12px; border: 1px solid #334155; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; transition: border-color 0.2s; }
+
+        /* SEARCH */
+        .search-box { display: flex; gap: 8px; margin-bottom: 12px; }
+        input, select { padding: 12px 14px; border-radius: 10px; border: 2px solid #334155; background: #1e293b; color: #f1f5f9; font-size: 0.9rem; outline: none; }
+        input:focus, select:focus { border-color: #10b981; }
+        input { flex: 1; }
+        button.search-btn { padding: 12px 20px; border-radius: 10px; border: none; background: linear-gradient(90deg, #10b981, #059669); color: white; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
+        button.search-btn:hover { transform: scale(1.03); }
+
+        /* FILTERS */
+        .filter-row { display: flex; gap: 8px; margin-bottom: 15px; flex-wrap: wrap; }
+        .filter-row select { flex: 1; min-width: 120px; }
+        .apply-btn { padding: 12px 20px; border-radius: 10px; border: none; background: linear-gradient(90deg, #3b82f6, #2563eb); color: white; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
+
+        /* COUNT */
+        .count-display { text-align: center; color: #94a3b8; font-size: 0.85rem; margin-bottom: 15px; padding: 10px; background: rgba(30, 41, 59, 0.5); border-radius: 8px; }
+
+        /* MATCH LIST ITEM */
+        .match-list-item { background: #1e293b; border-radius: 14px; padding: 16px; margin-bottom: 10px; border: 1px solid #334155; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; transition: border-color 0.2s; }
         .match-list-item:hover { border-color: #10b981; }
-        .match-info { flex: 1; min-width: 200px; }
-        .match-teams { font-size: 1.15rem; font-weight: 700; margin-bottom: 4px; }
-        .match-meta { color: #94a3b8; font-size: 0.85rem; }
-        .match-status-mini { display: inline-block; padding: 2px 8px; border-radius: 100px; font-size: 0.7rem; font-weight: 600; margin-left: 8px; }
+        .match-info { flex: 1; min-width: 200px; cursor: pointer; }
+        .match-teams { font-size: 1.05rem; font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        .match-meta { color: #94a3b8; font-size: 0.8rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .status-mini { display: inline-block; padding: 2px 8px; border-radius: 100px; font-size: 0.65rem; font-weight: 600; }
         .status-live { background: #ef4444; color: white; }
         .status-finished { background: #64748b; color: white; }
         .status-upcoming { background: #3b82f6; color: white; }
-        .analyze-btn { padding: 10px 20px; border-radius: 10px; border: none; background: linear-gradient(90deg, #3b82f6, #2563eb); color: white; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
-        .analyze-btn:hover { transform: scale(1.05); }
-        
-        /* SINGLE MATCH VIEW */
-        .back-btn { padding: 12px 24px; border-radius: 12px; border: 2px solid #334155; background: #1e293b; color: #94a3b8; font-weight: 600; cursor: pointer; margin-bottom: 20px; font-size: 1rem; }
-        .back-btn:hover { color: white; border-color: #10b981; }
-        .card { background: #1e293b; border-radius: 16px; padding: 25px; margin-bottom: 20px; border: 1px solid #334155; }
-        .match-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
-        .teams-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-        .team-logo { width: 48px; height: 48px; object-fit: contain; background: rgba(255,255,255,0.05); border-radius: 8px; padding: 4px; }
-        .teams { font-size: 1.5rem; font-weight: 700; }
-        .vs { color: #64748b; font-size: 1.2rem; margin: 0 8px; }
-        .league { color: #94a3b8; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px; margin-top: 5px; }
-        .date { color: #64748b; font-size: 0.9rem; }
-        .status-badge { display: inline-block; padding: 4px 10px; border-radius: 100px; font-size: 0.75rem; font-weight: 600; margin-top: 5px; }
-        .verdict { display: inline-block; padding: 10px 20px; border-radius: 100px; font-weight: 700; font-size: 1rem; margin-top: 15px; }
+        .mini-logo { width: 22px; height: 22px; border-radius: 4px; }
+        .match-actions { display: flex; gap: 6px; align-items: center; }
+        .analyze-btn { padding: 8px 14px; border-radius: 8px; border: none; background: linear-gradient(90deg, #3b82f6, #2563eb); color: white; font-weight: 600; cursor: pointer; font-size: 0.8rem; }
+        .star-btn { background: transparent; border: none; color: #64748b; font-size: 1.3rem; cursor: pointer; padding: 4px; }
+        .star-btn.on { color: #f59e0b; }
+
+        /* CARD */
+        .card { background: #1e293b; border-radius: 16px; padding: 20px; margin-bottom: 16px; border: 1px solid #334155; }
+        .match-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px; flex-wrap: wrap; gap: 10px; }
+        .teams-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .team-logo { width: 42px; height: 42px; object-fit: contain; background: rgba(255,255,255,0.05); border-radius: 8px; padding: 4px; }
+        .teams { font-size: 1.3rem; font-weight: 700; }
+        .vs { color: #64748b; font-size: 1rem; margin: 0 4px; }
+        .league { color: #94a3b8; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; margin-top: 5px; }
+        .date { color: #64748b; font-size: 0.8rem; }
+        .status-badge { display: inline-block; padding: 4px 10px; border-radius: 100px; font-size: 0.7rem; font-weight: 600; margin-top: 5px; }
+        .verdict { display: inline-block; padding: 8px 16px; border-radius: 100px; font-weight: 700; font-size: 0.9rem; margin-top: 10px; }
         .verdict.bet { background: #10b981; color: white; }
         .verdict.wait { background: #f59e0b; color: white; }
         .verdict.nobet { background: #ef4444; color: white; }
-        .prediction-row { background: #0f172a; border-radius: 10px; padding: 12px 18px; margin-top: 10px; display: flex; justify-content: space-between; align-items: center; }
-        .prediction-label { color: #94a3b8; font-size: 0.85rem; }
-        .prediction-value { font-weight: 700; font-size: 1.1rem; color: #10b981; }
-        .ai-preview { background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); border-radius: 12px; padding: 20px; margin-top: 20px; border: 1px solid #3b82f6; }
-        .ai-preview-title { color: #93c5fd; font-size: 0.85rem; text-transform: uppercase; font-weight: 700; margin-bottom: 10px; letter-spacing: 1px; }
-        .ai-preview-text { color: #dbeafe; font-size: 0.95rem; line-height: 1.6; }
-        .safest-bet { background: linear-gradient(90deg, #059669, #10b981); border-radius: 12px; padding: 20px; text-align: center; margin-top: 20px; }
-        .safest-bet .label { color: #d1fae5; font-size: 0.9rem; }
-        .safest-bet .value { font-size: 1.8rem; font-weight: 700; margin: 10px 0; color: white; }
-        .error { background: #7f1d1d; padding: 20px; border-radius: 12px; text-align: center; }
-        .loading { text-align: center; padding: 40px; color: #94a3b8; }
-        .hidden { display: none; }
-        h3 { margin-top: 20px; margin-bottom: 10px; font-size: 1.1rem; color: #cbd5e1; }
-        .chart-bar-container { margin-top: 10px; }
-        .chart-row { display: flex; align-items: center; margin-bottom: 8px; }
-        .chart-label { width: 100px; color: #94a3b8; font-size: 0.85rem; }
-        .chart-bar-bg { flex: 1; background: #0f172a; border-radius: 6px; height: 24px; position: relative; overflow: hidden; }
+
+        /* AI PREVIEW */
+        .ai-preview { background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); border-radius: 12px; padding: 16px; margin-top: 15px; border: 1px solid #3b82f6; }
+        .ai-preview-title { color: #93c5fd; font-size: 0.75rem; text-transform: uppercase; font-weight: 700; margin-bottom: 8px; letter-spacing: 1px; }
+        .ai-preview-text { color: #dbeafe; font-size: 0.88rem; line-height: 1.5; }
+
+        /* PREDICTIONS */
+        .prediction-row { background: #0f172a; border-radius: 10px; padding: 10px 14px; margin-top: 8px; display: flex; justify-content: space-between; align-items: center; }
+        .prediction-label { color: #94a3b8; font-size: 0.8rem; }
+        .prediction-value { font-weight: 700; font-size: 0.95rem; color: #10b981; text-align: right; }
+
+        h3 { margin-top: 16px; margin-bottom: 8px; font-size: 1rem; color: #cbd5e1; }
+
+        /* CHARTS */
+        .chart-row { display: flex; align-items: center; margin-bottom: 6px; }
+        .chart-label { width: 90px; color: #94a3b8; font-size: 0.78rem; }
+        .chart-bar-bg { flex: 1; background: #0f172a; border-radius: 6px; height: 20px; position: relative; overflow: hidden; }
         .chart-bar { height: 100%; border-radius: 6px; transition: width 0.5s; }
         .chart-bar.home { background: linear-gradient(90deg, #10b981, #059669); }
         .chart-bar.draw { background: linear-gradient(90deg, #f59e0b, #d97706); }
         .chart-bar.away { background: linear-gradient(90deg, #3b82f6, #2563eb); }
         .chart-bar.over { background: linear-gradient(90deg, #8b5cf6, #7c3aed); }
         .chart-bar.btts { background: linear-gradient(90deg, #ec4899, #db2777); }
-        .chart-value { margin-left: 10px; color: #f1f5f9; font-weight: 700; font-size: 0.85rem; width: 50px; text-align: right; }
-        .empty-msg { text-align: center; padding: 40px; color: #94a3b8; }
+        .chart-value { margin-left: 8px; color: #f1f5f9; font-weight: 700; font-size: 0.8rem; width: 45px; text-align: right; }
+
+        /* SAFEST BET */
+        .safest-bet { background: linear-gradient(90deg, #059669, #10b981); border-radius: 12px; padding: 16px; text-align: center; margin-top: 15px; }
+        .safest-bet .label { color: #d1fae5; font-size: 0.8rem; }
+        .safest-bet .value { font-size: 1.4rem; font-weight: 700; margin: 8px 0; color: white; }
+
+        /* UTILITIES */
+        .error { background: #7f1d1d; padding: 16px; border-radius: 10px; text-align: center; margin: 15px 0; font-size: 0.9rem; }
+        .loading { text-align: center; padding: 30px; color: #94a3b8; font-size: 0.9rem; }
+        .hidden { display: none !important; }
+        .back-btn { padding: 10px 20px; border-radius: 10px; border: 2px solid #334155; background: #1e293b; color: #94a3b8; font-weight: 600; cursor: pointer; margin-bottom: 15px; font-size: 0.9rem; }
+        .back-btn:hover { color: white; border-color: #10b981; }
+        .load-more-btn { display: block; width: 100%; padding: 14px; margin-top: 15px; border-radius: 12px; border: 2px solid #10b981; background: #1e293b; color: #10b981; font-weight: 700; font-size: 1rem; cursor: pointer; }
+        .load-more-btn:hover { background: #10b981; color: white; }
+        .empty-msg { text-align: center; padding: 30px; color: #94a3b8; }
     </style>
 </head>
 <body>
@@ -91,32 +114,64 @@
         <!-- MAIN SCREEN -->
         <div id="mainScreen">
             <div class="search-box">
-                <input type="text" id="teamInput" placeholder="Search team or league (e.g., Arsenal, Nigeria, La Liga)">
-                <button class="search-btn" id="searchBtn" onclick="searchTeam()">Search</button>
+                <input type="text" id="teamInput" placeholder="Search team...">
+                <button class="search-btn" onclick="searchTeam()">Search</button>
             </div>
+
             <div class="tabs">
-                <div class="tab active" id="tabAll" onclick="switchTab('all')">📅 All Matches</div>
-                <div class="tab" id="tabLive" onclick="switchTab('live')">🔴 Live Now</div>
+                <div class="tab active" id="tab-all" onclick="switchTab('all')">📅 All</div>
+                <div class="tab" id="tab-live" onclick="switchTab('live')">🔴 Live</div>
+                <div class="tab" id="tab-top" onclick="switchTab('top')">🏆 Top Picks</div>
+                <div class="tab" id="tab-favs" onclick="switchTab('favs')">⭐ Favorites</div>
             </div>
-            <div id="mainLoading" class="loading">☕ Loading matches... Please wait 30-60 seconds (server may be waking up)</div>
+
+            <div class="filter-row" id="filterRow">
+                <select id="dateFilter">
+                    <option value="today">Today</option>
+                    <option value="tomorrow">Tomorrow</option>
+                    <option value="yesterday">Yesterday</option>
+                    <option value="">Any Date</option>
+                </select>
+                <select id="statusFilter">
+                    <option value="all">All Status</option>
+                    <option value="live">Live</option>
+                    <option value="upcoming">Upcoming</option>
+                    <option value="finished">Finished</option>
+                </select>
+                <select id="sortBy">
+                    <option value="time">Kickoff Time</option>
+                    <option value="confidence">Confidence</option>
+                    <option value="league">League</option>
+                </select>
+                <button class="apply-btn" onclick="applyFilters()">Apply</button>
+            </div>
+
+            <div id="countDisplay" class="count-display hidden"></div>
+            <div id="mainLoading" class="loading">☕ Loading matches... Please wait.</div>
             <div id="mainError" class="error hidden"></div>
             <div id="matchList"></div>
+            <button id="loadMoreBtn" class="load-more-btn hidden" onclick="loadMore()">Load More Matches</button>
         </div>
 
-        <!-- SINGLE MATCH SCREEN -->
-        <div id="singleScreen" class="hidden">
-            <button class="back-btn" onclick="goBack()">← Back to Matches</button>
-            <div id="singleContent"></div>
+        <!-- DETAIL SCREEN -->
+        <div id="detailScreen" class="hidden">
+            <button class="back-btn" onclick="closeDetail()">← Back to Matches</button>
+            <div id="detailContent"></div>
         </div>
     </div>
 
     <script>
+        const API_BASE = 'https://football-engine.onrender.com';
         let currentTab = 'all';
-        let cachedMatches = [];
+        let currentPage = 0;
+        let currentSize = 100;
+        let allMatches = [];
+        let currentSearch = '';
+        let favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
 
-        // Generate team logo
+        // ---- LOGO GENERATION ----
         function teamInitials(name) {
-            if (!name) return "?";
+            if (!name) return '?';
             const words = name.replace(/FC|SC|CF|AC|AFC|United|City|Club/g, '').trim().split(/\s+/);
             if (words.length >= 2 && words[0] && words[1]) return (words[0][0] + words[1][0]).toUpperCase();
             return name.substring(0, 2).toUpperCase();
@@ -129,72 +184,73 @@
         }
         function makeLogo(name) {
             try {
-                const initials = teamInitials(name);
-                const color = teamColor(name);
-                const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="' + color + '"/><text x="32" y="42" font-family="Arial,sans-serif" font-size="28" font-weight="bold" fill="white" text-anchor="middle">' + initials + '</text></svg>';
+                const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="' + teamColor(name) + '"/><text x="32" y="42" font-family="Arial,sans-serif" font-size="28" font-weight="bold" fill="white" text-anchor="middle">' + teamInitials(name) + '</text></svg>';
                 return 'data:image/svg+xml;base64,' + btoa(svg);
             } catch (e) { return ''; }
         }
+
         function statusBadge(status) {
             const s = (status || '').toLowerCase();
-            if (s === 'live' || s === 'inprogress' || s === '2nd_half' || s === '1st_half' || s === 'halftime') return { class: 'status-live', text: '🔴 LIVE' };
-            if (s === 'finished') return { class: 'status-finished', text: 'FINISHED' };
-            return { class: 'status-upcoming', text: 'UPCOMING' };
+            if (s === 'live' || s === 'inprogress' || s === '2nd_half' || s === '1st_half' || s === 'halftime') return { cls: 'status-live', txt: '🔴 LIVE' };
+            if (s === 'finished') return { cls: 'status-finished', txt: 'FINISHED' };
+            return { cls: 'status-upcoming', txt: 'UPCOMING' };
         }
 
-        // RENDER MATCH LIST (Screen 1)
-        function renderMatchList(matches, title) {
+        function isFavorite(matchId) { return favorites.indexOf(matchId) !== -1; }
+        function toggleFav(e, matchId) {
+            e.stopPropagation();
+            const idx = favorites.indexOf(matchId);
+            if (idx === -1) favorites.push(matchId);
+            else favorites.splice(idx, 1);
+            localStorage.setItem('favorites', JSON.stringify(favorites));
+            if (currentTab === 'favs') renderMatchList(allMatches);
+            else updateStarButtons();
+        }
+        function updateStarButtons() {
+            document.querySelectorAll('[data-fav-id]').forEach(function(el) {
+                const id = parseInt(el.getAttribute('data-fav-id'));
+                if (isFavorite(id)) el.classList.add('on');
+                else el.classList.remove('on');
+            });
+        }
+
+        // ---- RENDER LIST ----
+        function renderMatchList(matches) {
             if (!matches || matches.length === 0) {
                 document.getElementById('matchList').innerHTML = '<div class="empty-msg">No matches to show.</div>';
                 return;
             }
             let html = '';
-            if (title) {
-                html += '<h3 style="text-align:center; margin-bottom:15px;">' + title + ' (' + matches.length + ')</h3>';
-            }
-            matches.forEach(function(m, index) {
+            matches.forEach(function(m) {
                 const sb = statusBadge(m.match.matchStatus);
                 const homeLogo = makeLogo(m.match.home);
                 const awayLogo = makeLogo(m.match.away);
+                const fav = isFavorite(m.matchId);
                 html += '<div class="match-list-item">';
-                html += '<div class="match-info">';
+                html += '<div class="match-info" onclick="openDetail(' + m.matchId + ')">';
                 html += '<div class="match-teams">';
-                html += '<img src="' + homeLogo + '" style="width:24px;height:24px;vertical-align:middle;margin-right:6px;border-radius:4px;">';
+                html += '<img src="' + homeLogo + '" class="mini-logo">';
                 html += m.match.home + ' <span style="color:#64748b;">vs</span> ' + m.match.away;
-                html += ' <img src="' + awayLogo + '" style="width:24px;height:24px;vertical-align:middle;margin-left:6px;border-radius:4px;">';
+                html += ' <img src="' + awayLogo + '" class="mini-logo">';
                 html += '</div>';
-                html += '<div class="match-meta">' + m.match.league + ' • ' + new Date(m.match.kickoff).toLocaleString();
-                html += '<span class="match-status-mini ' + sb.class + '">' + sb.text + '</span>';
+                html += '<div class="match-meta">' + (m.match.league || '') + ' • ' + new Date(m.match.kickoff).toLocaleString();
+                html += ' <span class="status-mini ' + sb.cls + '">' + sb.txt + '</span>';
                 html += '</div>';
                 html += '</div>';
-                html += '<button class="analyze-btn" onclick="showSingleMatch(' + index + ')">Analyze →</button>';
+                html += '<div class="match-actions">';
+                html += '<button class="star-btn ' + (fav ? 'on' : '') + '" data-fav-id="' + m.matchId + '" onclick="toggleFav(event, ' + m.matchId + ')">★</button>';
+                html += '<button class="analyze-btn" onclick="openDetail(' + m.matchId + ')">Analyze</button>';
+                html += '</div>';
                 html += '</div>';
             });
             document.getElementById('matchList').innerHTML = html;
-            cachedMatches = matches;
         }
 
-        // SHOW SINGLE MATCH (Screen 2)
-        function showSingleMatch(index) {
-            const m = cachedMatches[index];
-            if (!m) return;
-            document.getElementById('mainScreen').classList.add('hidden');
-            document.getElementById('singleScreen').classList.remove('hidden');
-            document.getElementById('singleContent').innerHTML = renderFullMatch(m);
-            window.scrollTo(0, 0);
-        }
-
-        function goBack() {
-            document.getElementById('singleScreen').classList.add('hidden');
-            document.getElementById('mainScreen').classList.remove('hidden');
-            window.scrollTo(0, 0);
-        }
-
-        // RENDER FULL MATCH (charts, AI, everything)
+        // ---- RENDER FULL DETAIL ----
         function renderFullMatch(m) {
             let verdictClass = 'nobet';
-            if (m.analysis.verdict.indexOf('BET') !== -1) verdictClass = 'bet';
-            if (m.analysis.verdict.indexOf('WAIT') !== -1) verdictClass = 'wait';
+            if (m.analysis.verdict.indexOf('BET') !== -1 && m.analysis.verdict.indexOf('NO BET') === -1) verdictClass = 'bet';
+            else if (m.analysis.verdict.indexOf('WAIT') !== -1) verdictClass = 'wait';
             const sb = statusBadge(m.match.matchStatus);
             const homeLogo = makeLogo(m.match.home);
             const awayLogo = makeLogo(m.match.away);
@@ -210,7 +266,7 @@
             html += '<img src="' + awayLogo + '" class="team-logo">';
             html += '</div>';
             html += '<div class="league">' + m.match.league + '</div>';
-            html += '<div class="status-badge ' + sb.class + '">' + sb.text + '</div>';
+            html += '<div class="status-badge ' + sb.cls + '">' + sb.txt + '</div>';
             html += '</div>';
             html += '<div class="date">' + new Date(m.match.kickoff).toLocaleString() + '</div>';
             html += '</div>';
@@ -228,84 +284,244 @@
             html += '<div class="prediction-row"><span class="prediction-label">Double Chance</span><span class="prediction-value">' + m.predictions.doubleChance + '</span></div>';
 
             html += '<h3>📊 Match Result Chart</h3>';
-            html += '<div class="chart-bar-container">';
             html += chartRow('Home Win', m.probabilities.homeWin, 'home');
             html += chartRow('Draw', m.probabilities.draw, 'draw');
             html += chartRow('Away Win', m.probabilities.awayWin, 'away');
-            html += '</div>';
 
             html += '<h3>⚽ Goals Chart</h3>';
-            html += '<div class="chart-bar-container">';
             html += chartRow('Over 1.5', m.markets.over15, 'over');
             html += chartRow('Over 2.5', m.markets.over25, 'over');
             html += chartRow('Over 3.5', m.markets.over35, 'over');
             html += chartRow('Over 4.5', m.markets.over45, 'over');
-            html += '</div>';
 
             html += '<h3>🥅 BTTS Chart</h3>';
-            html += '<div class="chart-bar-container">';
             html += chartRow('BTTS Yes', m.markets.bttsYes, 'btts');
             html += chartRow('BTTS No', m.markets.bttsNo, 'home');
-            html += '</div>';
 
             html += '<div class="safest-bet">';
             html += '<div class="label">🎯 SAFEST SELECTION</div>';
             html += '<div class="value">' + m.analysis.safestBet + '</div>';
-            html += '<div class="label">Confidence: ' + m.analysis.confidence + '% | Probability: ' + m.analysis.probability + '%</div>';
+            html += '<div class="label">Confidence: ' + m.analysis.confidence + '% (' + m.analysis.confidenceLabel + ') | Probability: ' + m.analysis.probability + '%</div>';
             html += '</div>';
             html += '</div>';
             return html;
         }
 
-        function chartRow(label, value, colorClass) {
-            return '<div class="chart-row"><div class="chart-label">' + label + '</div><div class="chart-bar-bg"><div class="chart-bar ' + colorClass + '" style="width: ' + value + '%"></div></div><div class="chart-value">' + value + '%</div></div>';
+        function chartRow(label, value, cls) {
+            return '<div class="chart-row"><div class="chart-label">' + label + '</div><div class="chart-bar-bg"><div class="chart-bar ' + cls + '" style="width: ' + value + '%"></div></div><div class="chart-value">' + value + '%</div></div>';
         }
 
-        // LOAD DATA
-        async function loadMatches(url, title) {
+        // ---- TABS ----
+        function switchTab(tab) {
+            currentTab = tab;
+            currentPage = 0;
+            allMatches = [];
+            document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+            document.getElementById('tab-' + tab).classList.add('active');
+
+            const filterRow = document.getElementById('filterRow');
+            const countDisplay = document.getElementById('countDisplay');
+            const loadMoreBtn = document.getElementById('loadMoreBtn');
+
+            if (tab === 'all') {
+                filterRow.classList.remove('hidden');
+                countDisplay.classList.remove('hidden');
+                loadMoreBtn.classList.remove('hidden');
+                loadMatches();
+            } else if (tab === 'live') {
+                filterRow.classList.add('hidden');
+                countDisplay.classList.add('hidden');
+                loadMoreBtn.classList.add('hidden');
+                loadLiveMatches();
+            } else if (tab === 'top') {
+                filterRow.classList.add('hidden');
+                countDisplay.classList.remove('hidden');
+                loadMoreBtn.classList.add('hidden');
+                loadTopPicks();
+            } else if (tab === 'favs') {
+                filterRow.classList.add('hidden');
+                countDisplay.classList.add('hidden');
+                loadMoreBtn.classList.add('hidden');
+                loadFavorites();
+            }
+        }
+
+        // ---- FETCH HELPERS ----
+        async function fetchJSON(url) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(function() { controller.abort(); }, 90000);
+            const r = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            return r.json();
+        }
+
+        function showError(msg) {
+            document.getElementById('mainLoading').classList.add('hidden');
+            document.getElementById('mainError').textContent = msg;
+            document.getElementById('mainError').classList.remove('hidden');
+        }
+
+        function updateCountDisplay(shown, total) {
+            document.getElementById('countDisplay').textContent = 'Showing ' + shown + ' of ' + total + ' matches';
+        }
+
+        // ---- LOAD MATCHES ----
+        async function loadMatches() {
+            document.getElementById('mainLoading').classList.remove('hidden');
+            document.getElementById('mainError').classList.add('hidden');
+            document.getElementById('matchList').innerHTML = '';
+            const date = document.getElementById('dateFilter').value;
+            const status = document.getElementById('statusFilter').value;
+            const sort = document.getElementById('sortBy').value;
+            const url = API_BASE + '/api/matches?page=' + currentPage + '&size=' + currentSize + '&date=' + date + '&status=' + status + '&sort=' + sort;
+            try {
+                const data = await fetchJSON(url);
+                document.getElementById('mainLoading').classList.add('hidden');
+                if (data.error) { showError(data.error); return; }
+                if (!data.matches || data.matches.length === 0) {
+                    document.getElementById('matchList').innerHTML = '<div class="empty-msg">No matches found for these filters.</div>';
+                    return;
+                }
+                allMatches = allMatches.concat(data.matches);
+                renderMatchList(allMatches);
+                updateCountDisplay(allMatches.length, data.total || allMatches.length);
+                if (data.hasMore) document.getElementById('loadMoreBtn').classList.remove('hidden');
+                else document.getElementById('loadMoreBtn').classList.add('hidden');
+            } catch (e) {
+                showError('Server is taking too long. Please refresh in 30 seconds.');
+            }
+        }
+
+        function loadMore() {
+            currentPage = currentPage + 1;
+            loadMatches();
+        }
+
+        function applyFilters() {
+            currentPage = 0;
+            allMatches = [];
+            loadMatches();
+        }
+
+        // ---- LIVE ----
+        async function loadLiveMatches() {
             document.getElementById('mainLoading').classList.remove('hidden');
             document.getElementById('mainError').classList.add('hidden');
             document.getElementById('matchList').innerHTML = '';
             try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(function() { controller.abort(); }, 90000);
-                const response = await fetch(url, { signal: controller.signal });
-                clearTimeout(timeoutId);
-                const data = await response.json();
+                const data = await fetchJSON(API_BASE + '/api/live');
                 document.getElementById('mainLoading').classList.add('hidden');
-                if (data.error) { document.getElementById('mainError').textContent = data.error; document.getElementById('mainError').classList.remove('hidden'); return; }
-                if (data.status === 'no_matches') { document.getElementById('mainError').textContent = data.message; document.getElementById('mainError').classList.remove('hidden'); return; }
-                renderMatchList(data.matches, title);
-            } catch (error) {
-                document.getElementById('mainLoading').classList.add('hidden');
-                document.getElementById('mainError').textContent = 'Server is taking too long to wake up. Please refresh in 30 seconds.';
-                document.getElementById('mainError').classList.remove('hidden');
+                if (data.error) { showError(data.error); return; }
+                if (!data.matches || data.matches.length === 0) {
+                    document.getElementById('matchList').innerHTML = '<div class="empty-msg">No live matches right now.</div>';
+                    return;
+                }
+                allMatches = data.matches;
+                renderMatchList(allMatches);
+                updateCountDisplay(allMatches.length, allMatches.length);
+                document.getElementById('countDisplay').classList.remove('hidden');
+            } catch (e) {
+                showError('Server is taking too long. Please refresh.');
             }
         }
 
-        function switchTab(tab) {
-            currentTab = tab;
-            document.getElementById('tabAll').classList.toggle('active', tab === 'all');
-            document.getElementById('tabLive').classList.toggle('active', tab === 'live');
-            if (tab === 'live') {
-                loadMatches('https://football-engine.onrender.com/api/live', '🔴 Live Matches');
-            } else {
-                loadMatches('https://football-engine.onrender.com/api/today', '📅 Today & Upcoming');
+        // ---- TOP PICKS ----
+        async function loadTopPicks() {
+            document.getElementById('mainLoading').classList.remove('hidden');
+            document.getElementById('mainError').classList.add('hidden');
+            document.getElementById('matchList').innerHTML = '';
+            try {
+                const data = await fetchJSON(API_BASE + '/api/top-picks');
+                document.getElementById('mainLoading').classList.add('hidden');
+                if (data.error) { showError(data.error); return; }
+                if (!data.matches || data.matches.length === 0) {
+                    document.getElementById('matchList').innerHTML = '<div class="empty-msg">No top picks available right now.</div>';
+                    return;
+                }
+                allMatches = data.matches;
+                renderMatchList(allMatches);
+                updateCountDisplay(allMatches.length, allMatches.length);
+                document.getElementById('countDisplay').classList.remove('hidden');
+            } catch (e) {
+                showError('Server is taking too long. Please refresh.');
             }
         }
 
-        function searchTeam() {
+        // ---- FAVORITES ----
+        async function loadFavorites() {
+            document.getElementById('mainLoading').classList.remove('hidden');
+            document.getElementById('mainError').classList.add('hidden');
+            document.getElementById('matchList').innerHTML = '';
+            if (favorites.length === 0) {
+                document.getElementById('mainLoading').classList.add('hidden');
+                document.getElementById('matchList').innerHTML = '<div class="empty-msg">⭐ No favorites yet. Star matches to save them here.</div>';
+                return;
+            }
+            // Re-fetch today's matches and filter
+            try {
+                const data = await fetchJSON(API_BASE + '/api/matches?size=200&date=');
+                document.getElementById('mainLoading').classList.add('hidden');
+                if (data.error) { showError(data.error); return; }
+                const favMatches = (data.matches || []).filter(function(m) { return isFavorite(m.matchId); });
+                allMatches = favMatches;
+                if (favMatches.length === 0) {
+                    document.getElementById('matchList').innerHTML = '<div class="empty-msg">Favorited matches are no longer available. Try refreshing.</div>';
+                    return;
+                }
+                renderMatchList(allMatches);
+            } catch (e) {
+                showError('Could not load favorites. Please refresh.');
+            }
+        }
+
+        // ---- SEARCH ----
+        async function searchTeam() {
             const team = document.getElementById('teamInput').value.trim();
             if (!team) { switchTab('all'); return; }
-            const url = 'https://football-engine.onrender.com/api/analyze?teamName=' + encodeURIComponent(team);
-            loadMatches(url, '🔍 Results for "' + team + '"');
+            document.getElementById('mainLoading').classList.remove('hidden');
+            document.getElementById('mainError').classList.add('hidden');
+            document.getElementById('matchList').innerHTML = '';
+            try {
+                const data = await fetchJSON(API_BASE + '/api/analyze?teamName=' + encodeURIComponent(team));
+                document.getElementById('mainLoading').classList.add('hidden');
+                if (data.status === 'no_matches' || !data.matches || data.matches.length === 0) {
+                    document.getElementById('matchList').innerHTML = '<div class="empty-msg">No matches found for "' + team + '".</div>';
+                    return;
+                }
+                allMatches = data.matches;
+                renderMatchList(allMatches);
+                updateCountDisplay(allMatches.length, allMatches.length);
+                document.getElementById('countDisplay').classList.remove('hidden');
+            } catch (e) {
+                showError('Server is taking too long. Please refresh.');
+            }
+        }
+
+        // ---- DETAIL ----
+        function openDetail(matchId) {
+            const m = allMatches.find(function(x) { return x.matchId === matchId; });
+            if (!m) return;
+            document.getElementById('mainScreen').classList.add('hidden');
+            document.getElementById('detailScreen').classList.remove('hidden');
+            document.getElementById('detailContent').innerHTML = renderFullMatch(m);
+            window.scrollTo(0, 0);
+        }
+
+        function closeDetail() {
+            document.getElementById('detailScreen').classList.add('hidden');
+            document.getElementById('mainScreen').classList.remove('hidden');
+            window.scrollTo(0, 0);
         }
 
         document.getElementById('teamInput').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') searchTeam();
         });
 
-        window.addEventListener('load', function() { switchTab('all'); });
+        // ---- INITIAL LOAD ----
+        window.addEventListener('load', function() {
+            document.getElementById('dateFilter').value = 'today';
+            switchTab('all');
+        });
     </script>
 </body>
 </html>
