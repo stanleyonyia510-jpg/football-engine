@@ -16,9 +16,10 @@ app.get('/', (req, res) => {
 
 const CACHE = {
   events: { data: null, timestamp: 0, ttl: 120000 },
-  live:   { data: null, timestamp: 0, ttl: 30000 },
+  live:   { data: null, timestamp: 0, ttl: 20000 },
   single: {},
-  leagues: { data: null, timestamp: 0, ttl: 300000 }
+  leagues: { data: null, timestamp: 0, ttl: 300000 },
+  teams: { data: null, timestamp: 0, ttl: 300000 }
 };
 
 function getCache(key) {
@@ -379,7 +380,7 @@ function handleApiError(error, res) {
   else if (status === 404) message = "Resource not found.";
   else if (status === 429) message = "Too many requests. Please wait a moment.";
   else if (error.code === 'ECONNABORTED' || (error.message && error.message.indexOf('timeout') !== -1)) {
-    message = "Bzzoiro is taking too long to respond. Please try again in 30 seconds.";
+    message = "Bzzoiro is taking too long. Please try again in 30 seconds.";
     res.status(504).json({ status: "error", error: message, statusCode: 504 });
     return;
   }
@@ -507,6 +508,7 @@ app.get('/api/analyze', async (req, res) => {
   }
 });
 
+// ============ FIXED LIVE ENDPOINT (scans up to 400 matches) ============
 app.get('/api/live', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
@@ -516,20 +518,35 @@ app.get('/api/live', async (req, res) => {
 
   try {
     let rawEvents = [];
+
+    // Try the dedicated live endpoint first
     try {
       const liveResp = await axios.get("https://sports.bzzoiro.com/api/events/live/", {
         headers: { Authorization: "Token " + API_KEY },
-        timeout: 30000
+        timeout: 20000
       });
       rawEvents = liveResp.data.results || [];
     } catch (e) {
-      const data = await fetchEventsPage(API_KEY, 50, 0, null);
-      const all = data.results || [];
-      rawEvents = all.filter(function(m) {
+      // Silent fail
+    }
+
+    // If live endpoint returned nothing, scan up to 400 matches
+    if (rawEvents.length === 0) {
+      const allEvents = [];
+      for (let page = 0; page < 4; page++) {
+        try {
+          const data = await fetchEventsPage(API_KEY, 100, page * 100, null);
+          const results = data.results || [];
+          allEvents.push.apply(allEvents, results);
+          if (!data.next) break;
+        } catch (e) { break; }
+      }
+      rawEvents = allEvents.filter(function(m) {
         const s = (m.status || "").toLowerCase();
         return s === 'live' || s === 'inprogress' || s === '2nd_half' || s === '1st_half' || s === 'halftime';
       });
     }
+
     const analyzed = rawEvents.map(analyzeMatch);
     setCache("live", analyzed);
     res.json({ status: "success", count: analyzed.length, matches: analyzed });
@@ -582,7 +599,6 @@ app.get('/api/top-picks', async (req, res) => {
   }
 });
 
-// ============ ENDPOINT: LEAGUE EXPLORER ============
 app.get('/api/leagues', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
@@ -591,7 +607,6 @@ app.get('/api/leagues', async (req, res) => {
   if (cached) return res.json({ status: "success", count: cached.length, leagues: cached, cached: true });
 
   try {
-    // Fetch multiple pages to build a good league list
     const all = [];
     let offset = 0;
     const pageSize = 100;
@@ -603,7 +618,6 @@ app.get('/api/leagues', async (req, res) => {
       offset += pageSize;
     }
 
-    // Group by league name
     const leagueMap = {};
     all.forEach(function(match) {
       let name = "Unknown Competition";
@@ -628,7 +642,6 @@ app.get('/api/leagues', async (req, res) => {
   }
 });
 
-// ============ ENDPOINT: MATCHES IN A SPECIFIC LEAGUE ============
 app.get('/api/league-matches', async (req, res) => {
   const leagueName = req.query.name || '';
   const API_KEY = process.env.BZZOIRO_API_KEY;
@@ -636,7 +649,6 @@ app.get('/api/league-matches', async (req, res) => {
   if (!leagueName) return res.status(400).json({ error: "League name required." });
 
   try {
-    // Fetch pages and filter by league name
     const all = [];
     let offset = 0;
     const pageSize = 100;
@@ -658,6 +670,95 @@ app.get('/api/league-matches', async (req, res) => {
 
     const analyzed = filtered.map(analyzeMatch);
     res.json({ status: "success", count: analyzed.length, leagueName: leagueName, matches: analyzed });
+  } catch (error) {
+    handleApiError(error, res);
+  }
+});
+
+// ============ TEAMS EXPLORER ============
+app.get('/api/teams', async (req, res) => {
+  const API_KEY = process.env.BZZOIRO_API_KEY;
+  if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
+
+  const cached = getCache("teams");
+  if (cached) return res.json({ status: "success", count: cached.length, teams: cached, cached: true });
+
+  try {
+    const all = [];
+    let offset = 0;
+    const pageSize = 100;
+    for (let i = 0; i < 2; i++) {
+      const data = await fetchEventsPage(API_KEY, pageSize, offset, null);
+      const results = data.results || [];
+      all.push.apply(all, results);
+      if (!data.next) break;
+      offset += pageSize;
+    }
+
+    const teamMap = {};
+    all.forEach(function(match) {
+      const home = getTeamName(match.home_team);
+      const away = getTeamName(match.away_team);
+      [home, away].forEach(function(name) {
+        if (!name || name === "Unknown") return;
+        if (!teamMap[name]) teamMap[name] = { name: name, count: 0, liveCount: 0, countries: {} };
+        teamMap[name].count++;
+        const s = (match.status || "").toLowerCase();
+        if (s === 'live' || s === 'inprogress' || s === '2nd_half' || s === '1st_half' || s === 'halftime') {
+          teamMap[name].liveCount++;
+        }
+        const country = (match.league && match.league.country) ? match.league.country : "";
+        if (country) teamMap[name].countries[country] = true;
+      });
+    });
+
+    const teams = Object.keys(teamMap).map(function(k) {
+      const t = teamMap[k];
+      return {
+        name: t.name,
+        count: t.count,
+        liveCount: t.liveCount,
+        country: Object.keys(t.countries)[0] || ""
+      };
+    });
+    teams.sort(function(a, b) { return b.count - a.count; });
+
+    setCache("teams", teams);
+    res.json({ status: "success", count: teams.length, teams: teams });
+  } catch (error) {
+    handleApiError(error, res);
+  }
+});
+
+app.get('/api/team-matches', async (req, res) => {
+  const teamName = req.query.name || '';
+  const API_KEY = process.env.BZZOIRO_API_KEY;
+  if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
+  if (!teamName) return res.status(400).json({ error: "Team name required." });
+
+  try {
+    const params = { limit: 100, team_name: teamName };
+    const data = await fetchEventsPage(API_KEY, 100, 0, params);
+    const rawEvents = data.results || [];
+
+    // Filter to only matches where this team actually plays
+    const teamLower = teamName.toLowerCase();
+    const filtered = rawEvents.filter(function(m) {
+      const home = getTeamName(m.home_team).toLowerCase();
+      const away = getTeamName(m.away_team).toLowerCase();
+      return home.includes(teamLower) || away.includes(teamLower);
+    });
+
+    const analyzed = filtered.map(analyzeMatch);
+    analyzed.sort(function(a, b) {
+      const priority = { live: 0, inprogress: 0, "2nd_half": 0, "1st_half": 0, halftime: 0, notstarted: 1, scheduled: 1, upcoming: 1, finished: 2 };
+      const ap = priority[a.match.matchStatus] !== undefined ? priority[a.match.matchStatus] : 1;
+      const bp = priority[b.match.matchStatus] !== undefined ? priority[b.match.matchStatus] : 1;
+      if (ap !== bp) return ap - bp;
+      return new Date(a.match.kickoff) - new Date(b.match.kickoff);
+    });
+
+    res.json({ status: "success", count: analyzed.length, teamName: teamName, matches: analyzed });
   } catch (error) {
     handleApiError(error, res);
   }
