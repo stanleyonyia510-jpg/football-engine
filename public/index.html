@@ -536,7 +536,7 @@
                 document.getElementById('mainLoading').classList.add('hidden');
                 if (data.error) { showError(data.error); return; }
                 if (!data.matches || data.matches.length === 0) {
-                    document.getElementById('matchList').innerHTML = '<div class="empty-msg">No matches found for these filters.</div>';
+                    document.getElementById('matchList').innerHTML = '<div class="empty-msg">No matches found for these filters.<br><br>💡 <b>Tip:</b> By this hour, today\'s matches are mostly <b>finished</b>. Try <b>"Tomorrow"</b> or change status to <b>"All Status"</b> to see all match types.</div>';
                     return;
                 }
                 allMatches = allMatches.concat(data.matches);
@@ -717,7 +717,7 @@
                 const data = await fetchJSON(API_BASE + '/api/analyze?teamName=' + encodeURIComponent(team));
                 document.getElementById('mainLoading').classList.add('hidden');
                 if (data.status === 'no_matches' || !data.matches || data.matches.length === 0) {
-                    document.getElementById('matchList').innerHTML = '<div class="empty-msg">No matches found for "' + team + '".</div>';
+                    document.getElementById('matchList').innerHTML = '<div class="empty-msg">No matches found for "' + team + '".<br><br>💡 Try a different spelling or search for a different team name.</div>';
                     return;
                 }
                 allMatches = data.matches;
