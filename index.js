@@ -94,6 +94,24 @@ function distinctiveKeyword(name) {
   return core || normalizeName(name);
 }
 
+// Check if a match involves a specific team (fuzzy match)
+function matchInvolvesTeam(match, teamName) {
+  if (!teamName) return true;
+  const home = getTeamName(match.home_team).toLowerCase();
+  const away = getTeamName(match.away_team).toLowerCase();
+  const search = teamName.toLowerCase().trim();
+
+  // Direct substring match
+  if (home.includes(search) || away.includes(search)) return true;
+
+  // Try individual keywords (for multi-word names)
+  const searchWords = search.split(/\s+/).filter(function(w) { return w.length > 3; });
+  for (let i = 0; i < searchWords.length; i++) {
+    if (home.includes(searchWords[i]) || away.includes(searchWords[i])) return true;
+  }
+  return false;
+}
+
 function extractPredictionLine(aiText) {
   if (!aiText) return null;
   const patterns = [
@@ -490,17 +508,36 @@ app.get('/api/today', async (req, res) => {
   }
 });
 
+// ============ FIXED SEARCH — filters to real matches for the searched team ============
 app.get('/api/analyze', async (req, res) => {
   const teamName = req.query.teamName || '';
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
 
   try {
-    const params = { limit: 50 };
-    if (teamName && teamName.trim() !== '') params.team_name = teamName;
-    const data = await fetchEventsPage(API_KEY, 50, 0, params);
-    const rawEvents = data.results || [];
-    if (rawEvents.length === 0) return res.json({ status: "no_matches", message: "No matches found. Try another search." });
+    if (!teamName || teamName.trim() === '') {
+      const data = await fetchEventsPage(API_KEY, 50, 0, null);
+      const rawEvents = data.results || [];
+      const analyzed = rawEvents.map(analyzeMatch);
+      return res.json({ status: "success", count: analyzed.length, matches: analyzed });
+    }
+
+    const params = { limit: 100, team_name: teamName };
+    const data = await fetchEventsPage(API_KEY, 100, 0, params);
+    let rawEvents = data.results || [];
+
+    // Filter to only matches where the searched team actually plays
+    rawEvents = rawEvents.filter(function(m) {
+      return matchInvolvesTeam(m, teamName);
+    });
+
+    if (rawEvents.length === 0) {
+      return res.json({
+        status: "no_matches",
+        message: "No matches found for '" + teamName + "'. Try a different team name."
+      });
+    }
+
     const analyzed = rawEvents.map(analyzeMatch);
     res.json({ status: "success", count: analyzed.length, searchTerm: teamName, matches: analyzed });
   } catch (error) {
@@ -508,7 +545,6 @@ app.get('/api/analyze', async (req, res) => {
   }
 });
 
-// ============ FIXED LIVE ENDPOINT (scans up to 400 matches) ============
 app.get('/api/live', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
@@ -518,19 +554,14 @@ app.get('/api/live', async (req, res) => {
 
   try {
     let rawEvents = [];
-
-    // Try the dedicated live endpoint first
     try {
       const liveResp = await axios.get("https://sports.bzzoiro.com/api/events/live/", {
         headers: { Authorization: "Token " + API_KEY },
         timeout: 20000
       });
       rawEvents = liveResp.data.results || [];
-    } catch (e) {
-      // Silent fail
-    }
+    } catch (e) { }
 
-    // If live endpoint returned nothing, scan up to 400 matches
     if (rawEvents.length === 0) {
       const allEvents = [];
       for (let page = 0; page < 4; page++) {
@@ -675,7 +706,6 @@ app.get('/api/league-matches', async (req, res) => {
   }
 });
 
-// ============ TEAMS EXPLORER ============
 app.get('/api/teams', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
@@ -741,12 +771,8 @@ app.get('/api/team-matches', async (req, res) => {
     const data = await fetchEventsPage(API_KEY, 100, 0, params);
     const rawEvents = data.results || [];
 
-    // Filter to only matches where this team actually plays
-    const teamLower = teamName.toLowerCase();
     const filtered = rawEvents.filter(function(m) {
-      const home = getTeamName(m.home_team).toLowerCase();
-      const away = getTeamName(m.away_team).toLowerCase();
-      return home.includes(teamLower) || away.includes(teamLower);
+      return matchInvolvesTeam(m, teamName);
     });
 
     const analyzed = filtered.map(analyzeMatch);
