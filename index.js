@@ -14,7 +14,6 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// ============ SIMPLE IN-MEMORY CACHE ============
 const CACHE = {
   events: { data: null, timestamp: 0, ttl: 120000 },
   live:   { data: null, timestamp: 0, ttl: 30000 },
@@ -42,7 +41,6 @@ function getSingleCache(id) {
   return e.data;
 }
 
-// ============ HELPERS ============
 function leagueDraw(leagueName) {
   const name = (leagueName || "").toLowerCase();
   if (name.includes("ligue 1")) return 0.30;
@@ -314,6 +312,11 @@ function analyzeMatch(match) {
     predictionLine: aiPrediction.predictionLine
   } : null;
 
+  // Extract real score fields for live/finished matches
+  const homeScoreVal = (match.home_score !== null && match.home_score !== undefined && match.home_score !== "") ? parseInt(match.home_score) : null;
+  const awayScoreVal = (match.away_score !== null && match.away_score !== undefined && match.away_score !== "") ? parseInt(match.away_score) : null;
+  const currentMinuteVal = (match.current_minute !== null && match.current_minute !== undefined) ? match.current_minute : null;
+
   return {
     matchId: match.id || null,
     match: {
@@ -323,6 +326,9 @@ function analyzeMatch(match) {
       country: (match.league && match.league.country) ? match.league.country : "",
       kickoff: match.event_date || match.date || "Unknown",
       matchStatus: status,
+      homeScore: homeScoreVal,
+      awayScore: awayScoreVal,
+      currentMinute: currentMinuteVal,
       venue: venue,
       referee: referee
     },
@@ -341,7 +347,6 @@ function analyzeMatch(match) {
   };
 }
 
-// ============ FETCH EVENTS WITH PAGINATION (45s timeout) ============
 async function fetchEventsPage(API_KEY, limit, offset, extraParams) {
   const params = new URLSearchParams();
   params.append("limit", String(limit));
@@ -366,7 +371,7 @@ function handleApiError(error, res) {
   let message = "Failed to fetch from Bzzoiro.";
   if (status === 401) message = "API key rejected.";
   else if (status === 402) message = "This data requires a paid Bzzoiro add-on.";
-  else if (status === 403) message = "Access forbidden. Your plan may not include this data.";
+  else if (status === 403) message = "Access forbidden.";
   else if (status === 404) message = "Resource not found.";
   else if (status === 429) message = "Too many requests. Please wait a moment.";
   else if (error.code === 'ECONNABORTED' || (error.message && error.message.indexOf('timeout') !== -1)) {
@@ -378,7 +383,6 @@ function handleApiError(error, res) {
   res.status(status).json({ status: "error", error: message, statusCode: status });
 }
 
-// ============ ENDPOINT: MATCHES ============
 app.get('/api/matches', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
@@ -463,7 +467,6 @@ app.get('/api/matches', async (req, res) => {
   }
 });
 
-// ============ ENDPOINT: TODAY ============
 app.get('/api/today', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
@@ -482,7 +485,6 @@ app.get('/api/today', async (req, res) => {
   }
 });
 
-// ============ ENDPOINT: SEARCH ============
 app.get('/api/analyze', async (req, res) => {
   const teamName = req.query.teamName || '';
   const API_KEY = process.env.BZZOIRO_API_KEY;
@@ -501,7 +503,6 @@ app.get('/api/analyze', async (req, res) => {
   }
 });
 
-// ============ ENDPOINT: LIVE ============
 app.get('/api/live', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
@@ -533,7 +534,6 @@ app.get('/api/live', async (req, res) => {
   }
 });
 
-// ============ ENDPOINT: MATCH DETAILS ============
 app.get('/api/match/:id', async (req, res) => {
   const matchId = req.params.id;
   const API_KEY = process.env.BZZOIRO_API_KEY;
@@ -558,7 +558,6 @@ app.get('/api/match/:id', async (req, res) => {
   }
 });
 
-// ============ ENDPOINT: TOP PICKS ============
 app.get('/api/top-picks', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
@@ -579,7 +578,6 @@ app.get('/api/top-picks', async (req, res) => {
   }
 });
 
-// ============ ENDPOINT: DEBUG ============
 app.get('/api/debug', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "No API key" });
@@ -595,7 +593,6 @@ app.get('/api/debug', async (req, res) => {
   }
 });
 
-// ============ ENDPOINT: REFRESH CACHE ============
 app.post('/api/refresh', (req, res) => {
   Object.keys(CACHE).forEach(function(k) {
     if (k === 'single') { CACHE.single = {}; }
