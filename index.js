@@ -17,7 +17,8 @@ app.get('/', (req, res) => {
 const CACHE = {
   events: { data: null, timestamp: 0, ttl: 120000 },
   live:   { data: null, timestamp: 0, ttl: 30000 },
-  single: {}
+  single: {},
+  leagues: { data: null, timestamp: 0, ttl: 300000 }
 };
 
 function getCache(key) {
@@ -248,7 +249,11 @@ function analyzeMatch(match) {
   const awayTeamName = getTeamName(match.away_team);
 
   let leagueName = "Unknown Competition";
-  if (match.league && match.league.name) leagueName = match.league.name;
+  let leagueCountry = "";
+  if (match.league && match.league.name) {
+    leagueName = match.league.name;
+    leagueCountry = match.league.country || "";
+  }
   else if (match.league_name) leagueName = match.league_name;
 
   let aiPreview = "";
@@ -312,7 +317,6 @@ function analyzeMatch(match) {
     predictionLine: aiPrediction.predictionLine
   } : null;
 
-  // Extract real score fields for live/finished matches
   const homeScoreVal = (match.home_score !== null && match.home_score !== undefined && match.home_score !== "") ? parseInt(match.home_score) : null;
   const awayScoreVal = (match.away_score !== null && match.away_score !== undefined && match.away_score !== "") ? parseInt(match.away_score) : null;
   const currentMinuteVal = (match.current_minute !== null && match.current_minute !== undefined) ? match.current_minute : null;
@@ -323,7 +327,7 @@ function analyzeMatch(match) {
       home: homeTeamName,
       away: awayTeamName,
       league: leagueName,
-      country: (match.league && match.league.country) ? match.league.country : "",
+      country: leagueCountry,
       kickoff: match.event_date || match.date || "Unknown",
       matchStatus: status,
       homeScore: homeScoreVal,
@@ -573,6 +577,87 @@ app.get('/api/top-picks', async (req, res) => {
     topPicks.sort(function(a, b) { return b.analysis.confidence - a.analysis.confidence; });
 
     res.json({ status: "success", count: topPicks.length, matches: topPicks.slice(0, 20) });
+  } catch (error) {
+    handleApiError(error, res);
+  }
+});
+
+// ============ ENDPOINT: LEAGUE EXPLORER ============
+app.get('/api/leagues', async (req, res) => {
+  const API_KEY = process.env.BZZOIRO_API_KEY;
+  if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
+
+  const cached = getCache("leagues");
+  if (cached) return res.json({ status: "success", count: cached.length, leagues: cached, cached: true });
+
+  try {
+    // Fetch multiple pages to build a good league list
+    const all = [];
+    let offset = 0;
+    const pageSize = 100;
+    for (let i = 0; i < 2; i++) {
+      const data = await fetchEventsPage(API_KEY, pageSize, offset, null);
+      const results = data.results || [];
+      all.push.apply(all, results);
+      if (!data.next) break;
+      offset += pageSize;
+    }
+
+    // Group by league name
+    const leagueMap = {};
+    all.forEach(function(match) {
+      let name = "Unknown Competition";
+      let country = "";
+      if (match.league && match.league.name) { name = match.league.name; country = match.league.country || ""; }
+      else if (match.league_name) name = match.league_name;
+      if (!leagueMap[name]) leagueMap[name] = { name: name, country: country, count: 0, liveCount: 0 };
+      leagueMap[name].count++;
+      const s = (match.status || "").toLowerCase();
+      if (s === 'live' || s === 'inprogress' || s === '2nd_half' || s === '1st_half' || s === 'halftime') {
+        leagueMap[name].liveCount++;
+      }
+    });
+
+    const leagues = Object.keys(leagueMap).map(function(k) { return leagueMap[k]; });
+    leagues.sort(function(a, b) { return b.count - a.count; });
+
+    setCache("leagues", leagues);
+    res.json({ status: "success", count: leagues.length, leagues: leagues });
+  } catch (error) {
+    handleApiError(error, res);
+  }
+});
+
+// ============ ENDPOINT: MATCHES IN A SPECIFIC LEAGUE ============
+app.get('/api/league-matches', async (req, res) => {
+  const leagueName = req.query.name || '';
+  const API_KEY = process.env.BZZOIRO_API_KEY;
+  if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
+  if (!leagueName) return res.status(400).json({ error: "League name required." });
+
+  try {
+    // Fetch pages and filter by league name
+    const all = [];
+    let offset = 0;
+    const pageSize = 100;
+    for (let i = 0; i < 2; i++) {
+      const data = await fetchEventsPage(API_KEY, pageSize, offset, null);
+      const results = data.results || [];
+      all.push.apply(all, results);
+      if (!data.next) break;
+      offset += pageSize;
+    }
+
+    const leagueLower = leagueName.toLowerCase();
+    const filtered = all.filter(function(m) {
+      let name = "";
+      if (m.league && m.league.name) name = m.league.name;
+      else if (m.league_name) name = m.league_name;
+      return name.toLowerCase() === leagueLower;
+    });
+
+    const analyzed = filtered.map(analyzeMatch);
+    res.json({ status: "success", count: analyzed.length, leagueName: leagueName, matches: analyzed });
   } catch (error) {
     handleApiError(error, res);
   }
