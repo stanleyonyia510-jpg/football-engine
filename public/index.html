@@ -12,8 +12,8 @@
         header h1 { font-size: 2rem; background: linear-gradient(90deg, #10b981, #3b82f6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 6px; }
         header p { color: #94a3b8; font-size: 0.95rem; }
 
-        .tabs { display: flex; gap: 8px; margin-bottom: 15px; flex-wrap: wrap; justify-content: center; }
-        .tab { padding: 10px 16px; border-radius: 100px; border: 2px solid #334155; background: #1e293b; color: #94a3b8; font-weight: 600; cursor: pointer; font-size: 0.85rem; }
+        .tabs { display: flex; gap: 6px; margin-bottom: 15px; flex-wrap: wrap; justify-content: center; }
+        .tab { padding: 9px 14px; border-radius: 100px; border: 2px solid #334155; background: #1e293b; color: #94a3b8; font-weight: 600; cursor: pointer; font-size: 0.78rem; }
         .tab.active { background: linear-gradient(90deg, #10b981, #059669); color: white; border-color: transparent; }
 
         .search-box { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -29,6 +29,15 @@
         .count-display { text-align: center; color: #94a3b8; font-size: 0.85rem; margin-bottom: 15px; padding: 10px; background: rgba(30, 41, 59, 0.5); border-radius: 8px; display: flex; justify-content: center; align-items: center; gap: 10px; flex-wrap: wrap; }
         .refresh-btn { padding: 6px 14px; border-radius: 8px; border: 1px solid #10b981; background: transparent; color: #10b981; font-weight: 600; cursor: pointer; font-size: 0.8rem; }
         .refresh-btn:hover { background: #10b981; color: white; }
+
+        /* LEAGUE CARDS */
+        .league-card { background: #1e293b; border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; border: 1px solid #334155; display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; transition: all 0.2s; }
+        .league-card:hover { border-color: #10b981; transform: translateX(4px); }
+        .league-card-name { font-size: 1rem; font-weight: 700; color: #f1f5f9; }
+        .league-card-country { color: #94a3b8; font-size: 0.78rem; margin-top: 3px; }
+        .league-card-count { display: inline-block; background: #1e40af; color: #93c5fd; padding: 3px 10px; border-radius: 100px; font-size: 0.75rem; font-weight: 700; margin-left: 6px; }
+        .league-card-live { display: inline-block; background: #ef4444; color: white; padding: 3px 10px; border-radius: 100px; font-size: 0.7rem; font-weight: 700; margin-left: 6px; }
+        .league-card-arrow { color: #64748b; font-size: 1.2rem; }
 
         .match-list-item { background: #1e293b; border-radius: 14px; padding: 16px; margin-bottom: 10px; border: 1px solid #334155; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; transition: border-color 0.2s; }
         .match-list-item:hover { border-color: #10b981; }
@@ -128,6 +137,7 @@
                 <div class="tab active" id="tab-all" onclick="switchTab('all')">📅 All</div>
                 <div class="tab" id="tab-live" onclick="switchTab('live')">🔴 Live</div>
                 <div class="tab" id="tab-top" onclick="switchTab('top')">🏆 Top Picks</div>
+                <div class="tab" id="tab-leagues" onclick="switchTab('leagues')">🌍 Leagues</div>
                 <div class="tab" id="tab-favs" onclick="switchTab('favs')">⭐ Favorites</div>
             </div>
 
@@ -155,6 +165,7 @@
             <div id="countDisplay" class="count-display hidden"></div>
             <div id="mainLoading" class="loading">☕ Loading matches... Please wait.</div>
             <div id="mainError" class="error hidden"></div>
+            <div id="leaguesList"></div>
             <div id="matchList"></div>
             <button id="loadMoreBtn" class="load-more-btn hidden" onclick="loadMore()">Load More Matches</button>
         </div>
@@ -244,6 +255,7 @@
         }
 
         function renderMatchList(matches) {
+            document.getElementById('leaguesList').innerHTML = '';
             if (!matches || matches.length === 0) {
                 document.getElementById('matchList').innerHTML = '<div class="empty-msg">No matches to show.</div>';
                 return;
@@ -275,6 +287,27 @@
                 html += '</div>';
             });
             document.getElementById('matchList').innerHTML = html;
+        }
+
+        function renderLeaguesList(leagues) {
+            document.getElementById('matchList').innerHTML = '';
+            if (!leagues || leagues.length === 0) {
+                document.getElementById('leaguesList').innerHTML = '<div class="empty-msg">No leagues available.</div>';
+                return;
+            }
+            let html = '';
+            leagues.forEach(function(l) {
+                html += '<div class="league-card" onclick="openLeague(\'' + l.name.replace(/'/g, "\\'") + '\')">';
+                html += '<div>';
+                html += '<div class="league-card-name">' + l.name + ' <span class="league-card-count">' + l.count + '</span>';
+                if (l.liveCount > 0) html += '<span class="league-card-live">🔴 ' + l.liveCount + ' live</span>';
+                html += '</div>';
+                if (l.country) html += '<div class="league-card-country">🌍 ' + l.country + '</div>';
+                html += '</div>';
+                html += '<div class="league-card-arrow">→</div>';
+                html += '</div>';
+            });
+            document.getElementById('leaguesList').innerHTML = html;
         }
 
         function renderFullMatch(m) {
@@ -384,6 +417,7 @@
             });
             document.getElementById('mainScreen').classList.remove('hidden');
             document.getElementById('detailScreen').classList.add('hidden');
+            document.getElementById('leaguesList').innerHTML = '';
             const countDisplay = document.getElementById('countDisplay');
             countDisplay.innerHTML = '🔎 Filtered by: <b>' + activeFilter.type + ' — ' + activeFilter.value + '</b> (' + filtered.length + ' matches) <button class="refresh-btn" onclick="clearFilter()">Clear</button>';
             countDisplay.classList.remove('hidden');
@@ -408,6 +442,8 @@
             const filterRow = document.getElementById('filterRow');
             const countDisplay = document.getElementById('countDisplay');
             const loadMoreBtn = document.getElementById('loadMoreBtn');
+            document.getElementById('leaguesList').innerHTML = '';
+            document.getElementById('matchList').innerHTML = '';
 
             if (tab === 'all') {
                 filterRow.classList.remove('hidden');
@@ -427,6 +463,11 @@
                 countDisplay.classList.remove('hidden');
                 loadMoreBtn.classList.add('hidden');
                 loadTopPicks();
+            } else if (tab === 'leagues') {
+                filterRow.classList.add('hidden');
+                countDisplay.classList.remove('hidden');
+                loadMoreBtn.classList.add('hidden');
+                loadLeagues();
             } else if (tab === 'favs') {
                 filterRow.classList.add('hidden');
                 countDisplay.classList.add('hidden');
@@ -526,6 +567,46 @@
             } catch (e) { showError('Server is taking too long. Please refresh.'); }
         }
 
+        async function loadLeagues() {
+            document.getElementById('mainLoading').classList.remove('hidden');
+            document.getElementById('mainError').classList.add('hidden');
+            document.getElementById('matchList').innerHTML = '';
+            document.getElementById('leaguesList').innerHTML = '';
+            try {
+                const data = await fetchJSON(API_BASE + '/api/leagues');
+                document.getElementById('mainLoading').classList.add('hidden');
+                if (data.error) { showError(data.error); return; }
+                if (!data.leagues || data.leagues.length === 0) {
+                    document.getElementById('leaguesList').innerHTML = '<div class="empty-msg">No leagues available.</div>';
+                    return;
+                }
+                renderLeaguesList(data.leagues);
+                document.getElementById('countDisplay').textContent = '🌍 ' + data.leagues.length + ' leagues available';
+                document.getElementById('countDisplay').classList.remove('hidden');
+            } catch (e) { showError('Server is taking too long. Please refresh.'); }
+        }
+
+        async function openLeague(leagueName) {
+            document.getElementById('mainLoading').classList.remove('hidden');
+            document.getElementById('mainError').classList.add('hidden');
+            document.getElementById('leaguesList').innerHTML = '';
+            document.getElementById('matchList').innerHTML = '';
+            try {
+                const data = await fetchJSON(API_BASE + '/api/league-matches?name=' + encodeURIComponent(leagueName));
+                document.getElementById('mainLoading').classList.add('hidden');
+                if (data.error) { showError(data.error); return; }
+                if (!data.matches || data.matches.length === 0) {
+                    document.getElementById('matchList').innerHTML = '<div class="empty-msg">No matches found in ' + leagueName + '.</div>';
+                    document.getElementById('countDisplay').innerHTML = '<b>' + leagueName + '</b> — 0 matches <button class="refresh-btn" onclick="switchTab(\'leagues\')">← Back</button>';
+                    return;
+                }
+                allMatches = data.matches;
+                renderMatchList(allMatches);
+                document.getElementById('countDisplay').innerHTML = '<b>' + leagueName + '</b> — ' + allMatches.length + ' matches <button class="refresh-btn" onclick="switchTab(\'leagues\')">← Back</button>';
+                document.getElementById('countDisplay').classList.remove('hidden');
+            } catch (e) { showError('Server is taking too long. Please refresh.'); }
+        }
+
         async function loadFavorites() {
             document.getElementById('mainLoading').classList.remove('hidden');
             document.getElementById('mainError').classList.add('hidden');
@@ -555,6 +636,7 @@
             document.getElementById('mainLoading').classList.remove('hidden');
             document.getElementById('mainError').classList.add('hidden');
             document.getElementById('matchList').innerHTML = '';
+            document.getElementById('leaguesList').innerHTML = '';
             try {
                 const data = await fetchJSON(API_BASE + '/api/analyze?teamName=' + encodeURIComponent(team));
                 document.getElementById('mainLoading').classList.add('hidden');
