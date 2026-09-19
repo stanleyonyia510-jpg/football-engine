@@ -4,16 +4,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Elite Football Predictor</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#10b981">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Elite Predictor">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #f1f5f9; min-height: 100vh; padding: 15px; }
         .container { max-width: 900px; margin: 0 auto; padding-bottom: 40px; }
         header { text-align: center; padding: 20px 0 15px 0; }
-        header h1 { font-size: 2rem; background: linear-gradient(90deg, #10b981, #3b82f6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 6px; }
-        header p { color: #94a3b8; font-size: 0.95rem; }
+        header h1 { font-size: 1.8rem; background: linear-gradient(90deg, #10b981, #3b82f6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 6px; }
+        header p { color: #94a3b8; font-size: 0.9rem; }
 
-        .tabs { display: flex; gap: 6px; margin-bottom: 15px; flex-wrap: wrap; justify-content: center; }
-        .tab { padding: 9px 13px; border-radius: 100px; border: 2px solid #334155; background: #1e293b; color: #94a3b8; font-weight: 600; cursor: pointer; font-size: 0.75rem; }
+        .tabs { display: flex; gap: 5px; margin-bottom: 15px; flex-wrap: wrap; justify-content: center; }
+        .tab { padding: 8px 12px; border-radius: 100px; border: 2px solid #334155; background: #1e293b; color: #94a3b8; font-weight: 600; cursor: pointer; font-size: 0.72rem; }
         .tab.active { background: linear-gradient(90deg, #10b981, #059669); color: white; border-color: transparent; }
 
         .search-box { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -117,6 +122,25 @@
         .load-more-btn { display: block; width: 100%; padding: 14px; margin-top: 15px; border-radius: 12px; border: 2px solid #10b981; background: #1e293b; color: #10b981; font-weight: 700; font-size: 1rem; cursor: pointer; }
         .load-more-btn:hover { background: #10b981; color: white; }
         .empty-msg { text-align: center; padding: 30px; color: #94a3b8; }
+
+        /* STATS & SETTINGS */
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+        .stat-card { background: #1e293b; border-radius: 12px; padding: 16px; text-align: center; border: 1px solid #334155; }
+        .stat-card .stat-num { font-size: 1.8rem; font-weight: 800; color: #10b981; }
+        .stat-card .stat-lbl { color: #94a3b8; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
+
+        .settings-item { background: #1e293b; border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; border: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; gap: 10px; cursor: pointer; }
+        .settings-item:hover { border-color: #10b981; }
+        .settings-label { color: #f1f5f9; font-weight: 600; font-size: 0.95rem; }
+        .settings-sub { color: #94a3b8; font-size: 0.78rem; margin-top: 3px; }
+        .settings-action { color: #10b981; font-weight: 600; font-size: 0.85rem; }
+        .settings-info { background: #1e293b; border-radius: 12px; padding: 16px; border: 1px solid #334155; margin-top: 15px; }
+        .settings-info p { color: #cbd5e1; font-size: 0.88rem; line-height: 1.6; margin-bottom: 10px; }
+        .settings-info h4 { color: #10b981; font-size: 0.95rem; margin-bottom: 8px; }
+        .disclaimer-box { background: #7f1d1d; border-radius: 10px; padding: 14px; margin-top: 15px; }
+        .disclaimer-box p { color: #fecaca; font-size: 0.82rem; line-height: 1.5; }
+        .status-ok { color: #10b981; font-weight: 600; }
+        .status-bad { color: #ef4444; font-weight: 600; }
     </style>
 </head>
 <body>
@@ -138,7 +162,9 @@
                 <div class="tab" id="tab-top" onclick="switchTab('top')">🏆 Top Picks</div>
                 <div class="tab" id="tab-leagues" onclick="switchTab('leagues')">🌍 Leagues</div>
                 <div class="tab" id="tab-teams" onclick="switchTab('teams')">👥 Teams</div>
+                <div class="tab" id="tab-stats" onclick="switchTab('stats')">📈 Stats</div>
                 <div class="tab" id="tab-favs" onclick="switchTab('favs')">⭐ Favorites</div>
+                <div class="tab" id="tab-settings" onclick="switchTab('settings')">⚙️</div>
             </div>
 
             <div class="filter-row" id="filterRow">
@@ -167,6 +193,8 @@
             <div id="mainError" class="error hidden"></div>
             <div id="leaguesList"></div>
             <div id="teamsList"></div>
+            <div id="statsList"></div>
+            <div id="settingsList"></div>
             <div id="matchList"></div>
             <button id="loadMoreBtn" class="load-more-btn hidden" onclick="loadMore()">Load More Matches</button>
         </div>
@@ -254,9 +282,16 @@
             return '<span style="color:#64748b;">vs</span>';
         }
 
-        function renderMatchList(matches) {
+        function clearAllLists() {
             document.getElementById('leaguesList').innerHTML = '';
             document.getElementById('teamsList').innerHTML = '';
+            document.getElementById('matchList').innerHTML = '';
+            document.getElementById('statsList').innerHTML = '';
+            document.getElementById('settingsList').innerHTML = '';
+        }
+
+        function renderMatchList(matches) {
+            clearAllLists();
             if (!matches || matches.length === 0) {
                 document.getElementById('matchList').innerHTML = '<div class="empty-msg">No matches to show.</div>';
                 return;
@@ -291,8 +326,7 @@
         }
 
         function renderLeaguesList(leagues) {
-            document.getElementById('matchList').innerHTML = '';
-            document.getElementById('teamsList').innerHTML = '';
+            clearAllLists();
             if (!leagues || leagues.length === 0) {
                 document.getElementById('leaguesList').innerHTML = '<div class="empty-msg">No leagues available.</div>';
                 return;
@@ -302,7 +336,7 @@
                 html += '<div class="league-card" onclick="openLeague(\'' + l.name.replace(/'/g, "\\'") + '\')">';
                 html += '<div>';
                 html += '<div class="league-card-name">' + l.name + ' <span class="league-card-count">' + l.count + '</span>';
-                if (l.liveCount > 0) html += '<span class="live-badge-sm">🔴 ' + l.liveCount + ' live</span>';
+                if (l.liveCount > 0) html += '<span class="live-badge-sm">🔴 ' + l.liveCount + '</span>';
                 html += '</div>';
                 if (l.country) html += '<div class="league-card-country">🌍 ' + l.country + '</div>';
                 html += '</div>';
@@ -313,8 +347,7 @@
         }
 
         function renderTeamsList(teams) {
-            document.getElementById('matchList').innerHTML = '';
-            document.getElementById('leaguesList').innerHTML = '';
+            clearAllLists();
             if (!teams || teams.length === 0) {
                 document.getElementById('teamsList').innerHTML = '<div class="empty-msg">No teams available.</div>';
                 return;
@@ -324,7 +357,7 @@
                 html += '<div class="team-card" onclick="openTeam(\'' + t.name.replace(/'/g, "\\'") + '\')">';
                 html += '<div>';
                 html += '<div class="team-card-name">' + t.name + ' <span class="team-card-count">' + t.count + '</span>';
-                if (t.liveCount > 0) html += '<span class="live-badge-sm">🔴 ' + t.liveCount + ' live</span>';
+                if (t.liveCount > 0) html += '<span class="live-badge-sm">🔴 ' + t.liveCount + '</span>';
                 html += '</div>';
                 if (t.country) html += '<div class="team-card-country">🌍 ' + t.country + '</div>';
                 html += '</div>';
@@ -332,6 +365,92 @@
                 html += '</div>';
             });
             document.getElementById('teamsList').innerHTML = html;
+        }
+
+        function renderStats(stats) {
+            clearAllLists();
+            let html = '<div class="stats-grid">';
+            html += '<div class="stat-card"><div class="stat-num">' + (stats.totalMatchesAvailable || 0).toLocaleString() + '</div><div class="stat-lbl">Total Available</div></div>';
+            html += '<div class="stat-card"><div class="stat-num" style="color:#ef4444;">' + (stats.liveMatches || 0) + '</div><div class="stat-lbl">Live Now</div></div>';
+            html += '<div class="stat-card"><div class="stat-num" style="color:#3b82f6;">' + (stats.upcomingMatches || 0) + '</div><div class="stat-lbl">Upcoming</div></div>';
+            html += '<div class="stat-card"><div class="stat-num" style="color:#64748b;">' + (stats.finishedMatches || 0) + '</div><div class="stat-lbl">Finished</div></div>';
+            html += '<div class="stat-card"><div class="stat-num" style="color:#8b5cf6;">' + (stats.leaguesCount || 0) + '</div><div class="stat-lbl">Leagues</div></div>';
+            html += '<div class="stat-card"><div class="stat-num" style="color:#ec4899;">' + (stats.countriesCount || 0) + '</div><div class="stat-lbl">Countries</div></div>';
+            html += '<div class="stat-card"><div class="stat-num" style="color:#f59e0b;">' + (stats.teamsCount || 0) + '</div><div class="stat-lbl">Teams</div></div>';
+            html += '</div>';
+            html += '<div class="settings-info" style="margin-top:15px;"><p style="font-size:0.8rem;color:#94a3b8;">📊 Numbers reflect the most recent 100 matches sample from the API. Total Available reflects the full count from Bzzoiro.</p></div>';
+            document.getElementById('statsList').innerHTML = html;
+        }
+
+        function renderSettings() {
+            clearAllLists();
+            let html = '';
+            html += '<div class="settings-item" onclick="clearCache()"><div><div class="settings-label">🔄 Refresh Data</div><div class="settings-sub">Clear server cache and reload fresh data</div></div><div class="settings-action">Clear</div></div>';
+            html += '<div class="settings-item" onclick="shareApp()"><div><div class="settings-label">📤 Share App</div><div class="settings-sub">Copy link to share with friends</div></div><div class="settings-action">Share</div></div>';
+            html += '<div class="settings-item" onclick="checkApiStatus()"><div><div class="settings-label">🛰️ API Status</div><div class="settings-sub">Check backend connection</div></div><div class="settings-action" id="apiStatusAction">Check</div></div>';
+            html += '<div class="settings-item" onclick="showAbout()"><div><div class="settings-label">ℹ️ About</div><div class="settings-sub">App version and info</div></div><div class="settings-action">View</div></div>';
+
+            html += '<div class="settings-info">';
+            html += '<h4>ℹ️ About Elite Football Predictor</h4>';
+            html += '<p>Version 5.0 — Real-time football analysis powered by Bzzoiro Sports Data API.</p>';
+            html += '<p>This app provides AI-driven match analysis, probabilistic predictions, and detailed match information for football matches worldwide.</p>';
+            html += '</div>';
+
+            html += '<div class="settings-info">';
+            html += '<h4>🔒 Privacy</h4>';
+            html += '<p>We do not collect personal data. Favorites are stored locally on your device only. No user accounts, no tracking, no ads.</p>';
+            html += '</div>';
+
+            html += '<div class="disclaimer-box">';
+            html += '<p><b>⚠️ Important Disclaimer</b></p>';
+            html += '<p>This app provides statistical analysis and AI-generated predictions for informational purposes only. It does NOT guarantee winning bets or outcomes. Football is unpredictable — even the best analysis can be wrong.</p>';
+            html += '<p><b>No prediction is 100% certain.</b> Never bet more than you can afford to lose. If you have a gambling problem, please seek help from a licensed support organization.</p>';
+            html += '<p>Data is provided by Bzzoiro Sports Data. We are not affiliated with any bookmaker or betting operator.</p>';
+            html += '</div>';
+
+            document.getElementById('settingsList').innerHTML = html;
+        }
+
+        async function clearCache() {
+            try {
+                await fetch(API_BASE + '/api/refresh', { method: 'POST' });
+                alert('✅ Cache cleared! Data will refresh on next load.');
+            } catch (e) {
+                alert('❌ Could not reach server. Please try again.');
+            }
+        }
+
+        function shareApp() {
+            const url = window.location.origin;
+            if (navigator.share) {
+                navigator.share({ title: 'Elite Football Predictor', text: 'Check out this football analysis app!', url: url });
+            } else {
+                navigator.clipboard.writeText(url).then(function() {
+                    alert('✅ Link copied to clipboard!');
+                }).catch(function() {
+                    alert('App URL: ' + url);
+                });
+            }
+        }
+
+        async function checkApiStatus() {
+            const el = document.getElementById('apiStatusAction');
+            el.textContent = 'Checking...';
+            try {
+                const r = await fetch(API_BASE + '/api/health');
+                const data = await r.json();
+                if (data.status === 'ok' && data.apiConfigured) {
+                    el.innerHTML = '<span class="status-ok">✓ Online</span>';
+                } else {
+                    el.innerHTML = '<span class="status-bad">✗ Not configured</span>';
+                }
+            } catch (e) {
+                el.innerHTML = '<span class="status-bad">✗ Offline</span>';
+            }
+        }
+
+        function showAbout() {
+            alert('Elite Football Predictor v5.0\n\nReal-time football analysis powered by Bzzoiro Sports Data.\n\nBuilt with Node.js + Express on Render.');
         }
 
         function renderFullMatch(m) {
@@ -441,8 +560,7 @@
             });
             document.getElementById('mainScreen').classList.remove('hidden');
             document.getElementById('detailScreen').classList.add('hidden');
-            document.getElementById('leaguesList').innerHTML = '';
-            document.getElementById('teamsList').innerHTML = '';
+            clearAllLists();
             const countDisplay = document.getElementById('countDisplay');
             countDisplay.innerHTML = '🔎 Filtered by: <b>' + activeFilter.type + ' — ' + activeFilter.value + '</b> (' + filtered.length + ' matches) <button class="refresh-btn" onclick="clearFilter()">Clear</button>';
             countDisplay.classList.remove('hidden');
@@ -467,9 +585,7 @@
             const filterRow = document.getElementById('filterRow');
             const countDisplay = document.getElementById('countDisplay');
             const loadMoreBtn = document.getElementById('loadMoreBtn');
-            document.getElementById('leaguesList').innerHTML = '';
-            document.getElementById('teamsList').innerHTML = '';
-            document.getElementById('matchList').innerHTML = '';
+            clearAllLists();
 
             if (tab === 'all') {
                 filterRow.classList.remove('hidden');
@@ -499,11 +615,21 @@
                 countDisplay.classList.remove('hidden');
                 loadMoreBtn.classList.add('hidden');
                 loadTeams();
+            } else if (tab === 'stats') {
+                filterRow.classList.add('hidden');
+                countDisplay.classList.add('hidden');
+                loadMoreBtn.classList.add('hidden');
+                loadStats();
             } else if (tab === 'favs') {
                 filterRow.classList.add('hidden');
                 countDisplay.classList.add('hidden');
                 loadMoreBtn.classList.add('hidden');
                 loadFavorites();
+            } else if (tab === 'settings') {
+                filterRow.classList.add('hidden');
+                countDisplay.classList.add('hidden');
+                loadMoreBtn.classList.add('hidden');
+                renderSettings();
             }
         }
 
@@ -526,7 +652,7 @@
         async function loadMatches() {
             document.getElementById('mainLoading').classList.remove('hidden');
             document.getElementById('mainError').classList.add('hidden');
-            document.getElementById('matchList').innerHTML = '';
+            clearAllLists();
             const date = document.getElementById('dateFilter').value;
             const status = document.getElementById('statusFilter').value;
             const sort = document.getElementById('sortBy').value;
@@ -536,7 +662,7 @@
                 document.getElementById('mainLoading').classList.add('hidden');
                 if (data.error) { showError(data.error); return; }
                 if (!data.matches || data.matches.length === 0) {
-                    document.getElementById('matchList').innerHTML = '<div class="empty-msg">No matches found for these filters.<br><br>💡 <b>Tip:</b> By this hour, today\'s matches are mostly <b>finished</b>. Try <b>"Tomorrow"</b> or change status to <b>"All Status"</b> to see all match types.</div>';
+                    document.getElementById('matchList').innerHTML = '<div class="empty-msg">No matches found for these filters.<br><br>💡 <b>Tip:</b> By this hour, today\'s matches are mostly <b>finished</b>. Try <b>"Tomorrow"</b> or change status to <b>"All Status"</b>.</div>';
                     return;
                 }
                 allMatches = allMatches.concat(data.matches);
@@ -557,7 +683,7 @@
             const isFirstLoad = allMatches.length === 0;
             if (isFirstLoad) {
                 document.getElementById('mainLoading').classList.remove('hidden');
-                document.getElementById('matchList').innerHTML = '';
+                clearAllLists();
             }
             document.getElementById('mainError').classList.add('hidden');
             try {
@@ -572,7 +698,7 @@
                 allMatches = data.matches;
                 renderMatchList(allMatches);
                 const lastUpdate = new Date().toLocaleTimeString();
-                document.getElementById('countDisplay').innerHTML = '🔴 Live matches: ' + allMatches.length + ' • Auto-refresh every 30s • Last: ' + lastUpdate;
+                document.getElementById('countDisplay').innerHTML = '🔴 Live: ' + allMatches.length + ' • Auto-refresh 30s • Last: ' + lastUpdate;
                 document.getElementById('countDisplay').classList.remove('hidden');
             } catch (e) {
                 showError('Server is taking too long. Please refresh.');
@@ -582,7 +708,7 @@
         async function loadTopPicks() {
             document.getElementById('mainLoading').classList.remove('hidden');
             document.getElementById('mainError').classList.add('hidden');
-            document.getElementById('matchList').innerHTML = '';
+            clearAllLists();
             try {
                 const data = await fetchJSON(API_BASE + '/api/top-picks');
                 document.getElementById('mainLoading').classList.add('hidden');
@@ -601,9 +727,7 @@
         async function loadLeagues() {
             document.getElementById('mainLoading').classList.remove('hidden');
             document.getElementById('mainError').classList.add('hidden');
-            document.getElementById('matchList').innerHTML = '';
-            document.getElementById('leaguesList').innerHTML = '';
-            document.getElementById('teamsList').innerHTML = '';
+            clearAllLists();
             try {
                 const data = await fetchJSON(API_BASE + '/api/leagues');
                 document.getElementById('mainLoading').classList.add('hidden');
@@ -621,9 +745,7 @@
         async function loadTeams() {
             document.getElementById('mainLoading').classList.remove('hidden');
             document.getElementById('mainError').classList.add('hidden');
-            document.getElementById('matchList').innerHTML = '';
-            document.getElementById('leaguesList').innerHTML = '';
-            document.getElementById('teamsList').innerHTML = '';
+            clearAllLists();
             try {
                 const data = await fetchJSON(API_BASE + '/api/teams');
                 document.getElementById('mainLoading').classList.add('hidden');
@@ -638,12 +760,24 @@
             } catch (e) { showError('Server is taking too long. Please refresh.'); }
         }
 
+        async function loadStats() {
+            document.getElementById('mainLoading').classList.remove('hidden');
+            document.getElementById('mainError').classList.add('hidden');
+            clearAllLists();
+            try {
+                const data = await fetchJSON(API_BASE + '/api/stats');
+                document.getElementById('mainLoading').classList.add('hidden');
+                if (data.error) { showError(data.error); return; }
+                renderStats(data);
+                document.getElementById('countDisplay').textContent = '📈 Live stats • Last: ' + new Date().toLocaleTimeString();
+                document.getElementById('countDisplay').classList.remove('hidden');
+            } catch (e) { showError('Server is taking too long. Please refresh.'); }
+        }
+
         async function openLeague(leagueName) {
             document.getElementById('mainLoading').classList.remove('hidden');
             document.getElementById('mainError').classList.add('hidden');
-            document.getElementById('leaguesList').innerHTML = '';
-            document.getElementById('teamsList').innerHTML = '';
-            document.getElementById('matchList').innerHTML = '';
+            clearAllLists();
             try {
                 const data = await fetchJSON(API_BASE + '/api/league-matches?name=' + encodeURIComponent(leagueName));
                 document.getElementById('mainLoading').classList.add('hidden');
@@ -663,9 +797,7 @@
         async function openTeam(teamName) {
             document.getElementById('mainLoading').classList.remove('hidden');
             document.getElementById('mainError').classList.add('hidden');
-            document.getElementById('leaguesList').innerHTML = '';
-            document.getElementById('teamsList').innerHTML = '';
-            document.getElementById('matchList').innerHTML = '';
+            clearAllLists();
             try {
                 const data = await fetchJSON(API_BASE + '/api/team-matches?name=' + encodeURIComponent(teamName));
                 document.getElementById('mainLoading').classList.add('hidden');
@@ -685,7 +817,7 @@
         async function loadFavorites() {
             document.getElementById('mainLoading').classList.remove('hidden');
             document.getElementById('mainError').classList.add('hidden');
-            document.getElementById('matchList').innerHTML = '';
+            clearAllLists();
             if (favorites.length === 0) {
                 document.getElementById('mainLoading').classList.add('hidden');
                 document.getElementById('matchList').innerHTML = '<div class="empty-msg">⭐ No favorites yet. Star matches to save them here.</div>';
@@ -710,14 +842,12 @@
             if (!team) { switchTab('all'); return; }
             document.getElementById('mainLoading').classList.remove('hidden');
             document.getElementById('mainError').classList.add('hidden');
-            document.getElementById('matchList').innerHTML = '';
-            document.getElementById('leaguesList').innerHTML = '';
-            document.getElementById('teamsList').innerHTML = '';
+            clearAllLists();
             try {
                 const data = await fetchJSON(API_BASE + '/api/analyze?teamName=' + encodeURIComponent(team));
                 document.getElementById('mainLoading').classList.add('hidden');
                 if (data.status === 'no_matches' || !data.matches || data.matches.length === 0) {
-                    document.getElementById('matchList').innerHTML = '<div class="empty-msg">No matches found for "' + team + '".<br><br>💡 Try a different spelling or search for a different team name.</div>';
+                    document.getElementById('matchList').innerHTML = '<div class="empty-msg">No matches found for "' + team + '".<br><br>💡 Try a different spelling.</div>';
                     return;
                 }
                 allMatches = data.matches;
@@ -748,6 +878,11 @@
         window.addEventListener('load', function() {
             document.getElementById('dateFilter').value = 'today';
             switchTab('all');
+
+            // Register Service Worker for PWA
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/sw.js').catch(function() { });
+            }
         });
     </script>
 </body>
