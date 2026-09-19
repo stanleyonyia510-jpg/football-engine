@@ -16,9 +16,9 @@ app.get('/', (req, res) => {
 
 // ============ SIMPLE IN-MEMORY CACHE ============
 const CACHE = {
-  events: { data: null, timestamp: 0, ttl: 60000 },   // 60 sec
-  live:   { data: null, timestamp: 0, ttl: 30000 },   // 30 sec
-  single: {} // keyed by match id
+  events: { data: null, timestamp: 0, ttl: 120000 },
+  live:   { data: null, timestamp: 0, ttl: 30000 },
+  single: {}
 };
 
 function getCache(key) {
@@ -27,17 +27,14 @@ function getCache(key) {
   if (Date.now() - entry.timestamp > entry.ttl) return null;
   return entry.data;
 }
-
 function setCache(key, data) {
   if (!CACHE[key]) CACHE[key] = { data: null, timestamp: 0, ttl: 60000 };
   CACHE[key].data = data;
   CACHE[key].timestamp = Date.now();
 }
-
 function setSingleCache(id, data) {
-  CACHE.single[id] = { data: data, timestamp: Date.now(), ttl: 300000 }; // 5 min
+  CACHE.single[id] = { data: data, timestamp: Date.now(), ttl: 300000 };
 }
-
 function getSingleCache(id) {
   const e = CACHE.single[id];
   if (!e) return null;
@@ -344,7 +341,7 @@ function analyzeMatch(match) {
   };
 }
 
-// ============ FETCH ALL EVENTS WITH PAGINATION ============
+// ============ FETCH EVENTS WITH PAGINATION (45s timeout) ============
 async function fetchEventsPage(API_KEY, limit, offset, extraParams) {
   const params = new URLSearchParams();
   params.append("limit", String(limit));
@@ -359,74 +356,64 @@ async function fetchEventsPage(API_KEY, limit, offset, extraParams) {
   const url = "https://sports.bzzoiro.com/api/events/?" + params.toString();
   const resp = await axios.get(url, {
     headers: { Authorization: "Token " + API_KEY },
-    timeout: 20000
+    timeout: 45000
   });
   return resp.data;
 }
 
-// ============ ERROR HANDLER ============
 function handleApiError(error, res) {
   const status = (error.response && error.response.status) || 500;
   let message = "Failed to fetch from Bzzoiro.";
-  if (status === 401) message = "API key rejected. Please check BZZOIRO_API_KEY in Render settings.";
+  if (status === 401) message = "API key rejected.";
   else if (status === 402) message = "This data requires a paid Bzzoiro add-on.";
   else if (status === 403) message = "Access forbidden. Your plan may not include this data.";
-  else if (status === 404) message = "The requested resource was not found.";
-  else if (status === 429) message = "Too many requests. Please wait a moment before trying again.";
+  else if (status === 404) message = "Resource not found.";
+  else if (status === 429) message = "Too many requests. Please wait a moment.";
+  else if (error.code === 'ECONNABORTED' || (error.message && error.message.indexOf('timeout') !== -1)) {
+    message = "Bzzoiro is taking too long to respond. Please try again in 30 seconds.";
+    res.status(504).json({ status: "error", error: message, statusCode: 504 });
+    return;
+  }
   else if (error.message) message = error.message;
-
-  res.status(status).json({
-    status: "error",
-    error: message,
-    statusCode: status
-  });
+  res.status(status).json({ status: "error", error: message, statusCode: status });
 }
 
-// ============ ENDPOINT: MAIN MATCHES (paginated, filterable, cached) ============
+// ============ ENDPOINT: MATCHES ============
 app.get('/api/matches', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
 
   const page = parseInt(req.query.page) || 0;
-  const size = Math.min(parseInt(req.query.size) || 100, 200);
-  const dateFilter = req.query.date || ""; // "today", "tomorrow", "yesterday", "YYYY-MM-DD", ""
+  const size = Math.min(parseInt(req.query.size) || 50, 100);
+  const dateFilter = req.query.date || "";
   const statusFilter = req.query.status || "all";
   const sortBy = req.query.sort || "time";
 
   const cacheKey = "events_" + page + "" + size + "" + dateFilter + "_" + statusFilter;
   const cached = getCache(cacheKey);
-  if (cached) {
-    return res.json(Object.assign({}, cached, { cached: true }));
-  }
+  if (cached) return res.json(Object.assign({}, cached, { cached: true }));
 
   try {
-    // Build date params based on filter
     const extraParams = {};
     const today = new Date();
     const todayStr = today.toISOString().split("T")[0];
-    if (dateFilter === "today") {
-      extraParams.date_from = todayStr;
-      extraParams.date_to = todayStr;
-    } else if (dateFilter === "tomorrow") {
+    if (dateFilter === "today") { extraParams.date_from = todayStr; extraParams.date_to = todayStr; }
+    else if (dateFilter === "tomorrow") {
       const tmr = new Date(today); tmr.setDate(tmr.getDate() + 1);
       const tmrStr = tmr.toISOString().split("T")[0];
-      extraParams.date_from = tmrStr;
-      extraParams.date_to = tmrStr;
+      extraParams.date_from = tmrStr; extraParams.date_to = tmrStr;
     } else if (dateFilter === "yesterday") {
       const yst = new Date(today); yst.setDate(yst.getDate() - 1);
       const ystStr = yst.toISOString().split("T")[0];
-      extraParams.date_from = ystStr;
-      extraParams.date_to = ystStr;
+      extraParams.date_from = ystStr; extraParams.date_to = ystStr;
     } else if (/^\d{4}-\d{2}-\d{2}$/.test(dateFilter)) {
-      extraParams.date_from = dateFilter;
-      extraParams.date_to = dateFilter;
+      extraParams.date_from = dateFilter; extraParams.date_to = dateFilter;
     }
 
     const offset = page * size;
     const data = await fetchEventsPage(API_KEY, size, offset, extraParams);
     let rawEvents = data.results || [];
 
-    // Apply status filter server-side (in case Bzzoiro doesn't filter)
     if (statusFilter !== "all") {
       const want = statusFilter.toLowerCase();
       rawEvents = rawEvents.filter(function(m) {
@@ -440,12 +427,9 @@ app.get('/api/matches', async (req, res) => {
 
     const analyzed = rawEvents.map(analyzeMatch);
 
-    // Sort
-    if (sortBy === "confidence") {
-      analyzed.sort(function(a, b) { return b.analysis.confidence - a.analysis.confidence; });
-    } else if (sortBy === "league") {
-      analyzed.sort(function(a, b) { return (a.match.league || "").localeCompare(b.match.league || ""); });
-    } else if (sortBy === "status") {
+    if (sortBy === "confidence") analyzed.sort(function(a, b) { return b.analysis.confidence - a.analysis.confidence; });
+    else if (sortBy === "league") analyzed.sort(function(a, b) { return (a.match.league || "").localeCompare(b.match.league || ""); });
+    else if (sortBy === "status") {
       const priority = { live: 0, inprogress: 0, "2nd_half": 0, "1st_half": 0, halftime: 0, notstarted: 1, scheduled: 1, upcoming: 1, finished: 2 };
       analyzed.sort(function(a, b) {
         const ap = priority[a.match.matchStatus] !== undefined ? priority[a.match.matchStatus] : 1;
@@ -453,10 +437,7 @@ app.get('/api/matches', async (req, res) => {
         return ap - bp;
       });
     } else {
-      // default: sort by kickoff time
-      analyzed.sort(function(a, b) {
-        return new Date(a.match.kickoff) - new Date(b.match.kickoff);
-      });
+      analyzed.sort(function(a, b) { return new Date(a.match.kickoff) - new Date(b.match.kickoff); });
     }
 
     const totalCount = data.count || data.total || analyzed.length;
@@ -477,24 +458,21 @@ app.get('/api/matches', async (req, res) => {
 
     setCache(cacheKey, response);
     res.json(response);
-
   } catch (error) {
     handleApiError(error, res);
   }
 });
 
-// ============ ENDPOINT: TODAY (kept for backward compat) ============
+// ============ ENDPOINT: TODAY ============
 app.get('/api/today', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
 
   const cached = getCache("events");
-  if (cached) {
-    return res.json({ status: "success", count: cached.length, matches: cached, cached: true });
-  }
+  if (cached) return res.json({ status: "success", count: cached.length, matches: cached, cached: true });
 
   try {
-    const data = await fetchEventsPage(API_KEY, 200, 0, null);
+    const data = await fetchEventsPage(API_KEY, 50, 0, null);
     const rawEvents = data.results || [];
     const analyzed = rawEvents.map(analyzeMatch);
     setCache("events", analyzed);
@@ -511,9 +489,9 @@ app.get('/api/analyze', async (req, res) => {
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
 
   try {
-    const params = { limit: 200 };
+    const params = { limit: 50 };
     if (teamName && teamName.trim() !== '') params.team_name = teamName;
-    const data = await fetchEventsPage(API_KEY, 200, 0, params);
+    const data = await fetchEventsPage(API_KEY, 50, 0, params);
     const rawEvents = data.results || [];
     if (rawEvents.length === 0) return res.json({ status: "no_matches", message: "No matches found. Try another search." });
     const analyzed = rawEvents.map(analyzeMatch);
@@ -529,20 +507,18 @@ app.get('/api/live', async (req, res) => {
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
 
   const cached = getCache("live");
-  if (cached) {
-    return res.json({ status: "success", count: cached.length, matches: cached, cached: true });
-  }
+  if (cached) return res.json({ status: "success", count: cached.length, matches: cached, cached: true });
 
   try {
     let rawEvents = [];
     try {
       const liveResp = await axios.get("https://sports.bzzoiro.com/api/events/live/", {
         headers: { Authorization: "Token " + API_KEY },
-        timeout: 15000
+        timeout: 30000
       });
       rawEvents = liveResp.data.results || [];
     } catch (e) {
-      const data = await fetchEventsPage(API_KEY, 200, 0, null);
+      const data = await fetchEventsPage(API_KEY, 50, 0, null);
       const all = data.results || [];
       rawEvents = all.filter(function(m) {
         const s = (m.status || "").toLowerCase();
@@ -570,7 +546,7 @@ app.get('/api/match/:id', async (req, res) => {
   try {
     const resp = await axios.get("https://sports.bzzoiro.com/api/events/" + matchId + "/", {
       headers: { Authorization: "Token " + API_KEY },
-      timeout: 10000
+      timeout: 30000
     });
     const match = resp.data;
     if (!match || !match.id) return res.status(404).json({ error: "Match not found." });
@@ -588,11 +564,10 @@ app.get('/api/top-picks', async (req, res) => {
   if (!API_KEY) return res.status(500).json({ error: "API key not configured." });
 
   try {
-    const data = await fetchEventsPage(API_KEY, 200, 0, null);
+    const data = await fetchEventsPage(API_KEY, 50, 0, null);
     const rawEvents = data.results || [];
     const analyzed = rawEvents.map(analyzeMatch);
 
-    // Top picks = only BET verdict with high confidence
     const topPicks = analyzed.filter(function(m) {
       return m.analysis.verdict.indexOf("BET") !== -1 && m.analysis.verdict.indexOf("NO BET") === -1 && m.analysis.confidence >= 60;
     });
@@ -604,7 +579,7 @@ app.get('/api/top-picks', async (req, res) => {
   }
 });
 
-// ============ ENDPOINT: DEBUG (for testing) ============
+// ============ ENDPOINT: DEBUG ============
 app.get('/api/debug', async (req, res) => {
   const API_KEY = process.env.BZZOIRO_API_KEY;
   if (!API_KEY) return res.status(500).json({ error: "No API key" });
@@ -613,17 +588,14 @@ app.get('/api/debug', async (req, res) => {
     res.json({
       debug: true,
       count: data.count || null,
-      total: data.total || null,
-      hasNext: !!data.next,
-      resultCount: (data.results || []).length,
-      firstMatchKeys: (data.results && data.results[0]) ? Object.keys(data.results[0]) : []
+      resultCount: (data.results || []).length
     });
   } catch (error) {
     handleApiError(error, res);
   }
 });
 
-// ============ ENDPOINT: CACHE CLEAR (manual refresh) ============
+// ============ ENDPOINT: REFRESH CACHE ============
 app.post('/api/refresh', (req, res) => {
   Object.keys(CACHE).forEach(function(k) {
     if (k === 'single') { CACHE.single = {}; }
